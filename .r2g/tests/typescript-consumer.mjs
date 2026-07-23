@@ -8,6 +8,14 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectDirectory = path.resolve(testDirectory, '..');
 const consumerDirectory = path.join(projectDirectory, 'fixtures', 'typescript-consumer');
 
+// The TypeScript compile check needs npm + node; phase-C container images for
+// other runtimes (oven/bun, denoland/deno) don't ship them, so skip gracefully.
+const npmProbe = spawnSync('npm', ['--version'], { encoding: 'utf8' });
+if (npmProbe.error || npmProbe.status !== 0) {
+  console.log('phase-T typescript-consumer: npm is not available in this runtime; skipping');
+  process.exit(0);
+}
+
 const run = (label, command, args, cwd) => {
   const result = spawnSync(command, args, {
     cwd,
