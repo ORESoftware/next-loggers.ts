@@ -136,6 +136,17 @@ const log = createEdgeLogger({
 });
 ```
 
+`fallbackEndpoint` gives every HTTP transport a priority/fallback pair (for
+example your own Next/Vercel route first, a Google Apps Script collector
+second), and `method` supports `POST`/`PUT`/`PATCH`:
+
+```ts
+http: {
+  endpoint: 'https://app.example.com/api/err-trace',
+  fallbackEndpoint: 'https://script.google.com/macros/s/DEPLOYMENT_ID/exec',
+}
+```
+
 Custom transports implement one small interface:
 
 ```ts
@@ -148,6 +159,91 @@ const transport: LogTransport = {
   },
 };
 ```
+
+## Error tracking
+
+Send `ERROR`/`FATAL` records (configurable via `minLevel`) to a dedicated
+collector, chainable at construction time:
+
+```ts
+export const logger = new BaseLogger()
+  .setALS(requestContext)
+  .setErrorTrackingUrl('https://app.example.com/api/err-trace', {
+    fallbackUrl: 'https://script.google.com/macros/s/DEPLOYMENT_ID/exec',
+  });
+```
+
+Identical records are deduped by a level/runtime/message/trace hash (capped at
+5000 entries; a failed send releases the hash so the next occurrence retries).
+Pass `dedupe: false` to disable.
+
+## Ambient context (AsyncLocalStorage)
+
+`@oresoftware/next-loggers/context` stores per-request context in
+`AsyncLocalStorage` on Node, Bun, Deno, and edge runtimes; browsers get a
+single-frame fallback through the package's `browser` export condition:
+
+```ts
+import { installLogContextProvider, runWithLogContext } from '@oresoftware/next-loggers/context';
+
+installLogContextProvider(); // every logger now reads the ambient frame
+
+await runWithLogContext(
+  { loggedInUser: { id: userId }, traceId: requestId, fields: { route } },
+  () => handleRequest(request),
+);
+```
+
+Merge precedence, lowest to highest: logger state, ambient context,
+event-level calls. To attach your own store (any object with `getStore()`,
+including zone-based stores) to a single logger:
+
+```ts
+export const logger = new BaseLogger().setALS(myStorage, (store) => ({
+  loggedInUser: { id: store.userId },
+  traceId: store.requestId,
+}));
+```
+
+## Config file: .next-logger.ts
+
+`@oresoftware/next-loggers/config` loads `.next-logger.ts` (or `.mts`/`.mjs`/
+`.js`) from the project root. TypeScript configs load natively on Bun, Deno,
+and Node >= 22.18 (type stripping). The config is code, so it can read env
+vars and construct transports:
+
+```ts
+// .next-logger.ts
+import type { LoggerOptions } from '@oresoftware/next-loggers/base';
+
+const config: LoggerOptions = {
+  appName: 'my-app',
+  maxLevel: process.env.DD_ENV === 'production' ? 'info' : 'trace',
+  errorTracking: { url: process.env.ERR_TRACE_URL!, fallbackUrl: process.env.GAS_URL },
+};
+export default config;
+```
+
+```ts
+import { createLoggerFromConfig } from '@oresoftware/next-loggers/config';
+export const logger = await createLoggerFromConfig();
+```
+
+`NEXT_LOGGER_*` env vars override the file (`NEXT_LOGGER_APP_NAME`,
+`NEXT_LOGGER_MAX_LEVEL`, `NEXT_LOGGER_ERROR_TRACKING_URL`,
+`NEXT_LOGGER_ERROR_TRACKING_FALLBACK_URL`, `NEXT_LOGGER_HTTP_ENDPOINT`,
+`NEXT_LOGGER_SUPABASE_URL`, ...). The names pair with CLI flags via
+[flags-2-env](https://github.com/oresoftware/flags-2-env):
+`--next-logger-app-name=x` becomes `NEXT_LOGGER_APP_NAME=x`.
+
+## Redaction
+
+Values, fields, context, meta, and error properties whose keys contain
+`password`, `token`, `secret`, `email`, `phone`, `ssn`, `bankaccount`, or
+`authtoken` are replaced with `[REDACTED]` by default. The
+`loggedInUser`/`users` identity blocks are exempt so correlation keeps
+working. Configure with `redactKeys: ['mypattern']` or disable with
+`redactKeys: false`.
 
 ## Next.js
 

@@ -69,6 +69,18 @@
       "types": "./dist/deno-logger.d.ts",
       "default": "./dist/deno-logger.js"
     },
+    "./context": {
+      "browser": {
+        "types": "./dist/context-browser.d.ts",
+        "default": "./dist/context-browser.js"
+      },
+      "types": "./dist/context.d.ts",
+      "default": "./dist/context.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
     "./eslint": {
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"

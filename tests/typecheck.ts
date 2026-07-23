@@ -7,11 +7,31 @@ import {
   type LogLevel,
   type LogTransport,
 } from '@oresoftware/next-loggers/base';
-import { createBrowserLogger } from '@oresoftware/next-loggers/browser';
-import { createBunLogger } from '@oresoftware/next-loggers/bun';
-import { createDenoLogger } from '@oresoftware/next-loggers/deno';
-import { createEdgeLogger } from '@oresoftware/next-loggers/edge';
-import { createNodeLogger } from '@oresoftware/next-loggers/node';
+import {
+  createBrowserLogger,
+  type LoggerOptions as BrowserSharedOptions,
+  type LogRecord as BrowserSharedRecord,
+} from '@oresoftware/next-loggers/browser';
+import {
+  createBunLogger,
+  type FlushOptions as BunSharedFlushOptions,
+  type LogRecord as BunSharedRecord,
+} from '@oresoftware/next-loggers/bun';
+import {
+  createDenoLogger,
+  type LogTransport as DenoSharedTransport,
+  type LogRecord as DenoSharedRecord,
+} from '@oresoftware/next-loggers/deno';
+import {
+  createEdgeLogger,
+  type SupabaseRealtimeOptions as EdgeSharedSupabaseOptions,
+  type LogRecord as EdgeSharedRecord,
+} from '@oresoftware/next-loggers/edge';
+import {
+  createNodeLogger,
+  type HttpTransportOptions as NodeSharedHttpOptions,
+  type LogRecord as NodeSharedRecord,
+} from '@oresoftware/next-loggers/node';
 import eslintPlugin, { requireSendRule } from '@oresoftware/next-loggers/eslint';
 
 const transport: LogTransport = {

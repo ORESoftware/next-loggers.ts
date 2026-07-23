@@ -57,6 +57,9 @@ export interface LogTransport {
 
 export interface HttpTransportOptions {
   endpoint: string;
+  /** Tried when the primary endpoint fails (e.g. a Google Apps Script backup collector). */
+  fallbackEndpoint?: string;
+  method?: 'POST' | 'PUT' | 'PATCH';
   headers?: Record<string, string>;
   timeoutMillis?: number;
   fetch?: typeof fetch;
@@ -93,6 +96,69 @@ export interface SupabaseRealtimeOptions {
   webSocketFactory?: WebSocketFactory;
 }
 
+/**
+ * Ambient request/task context merged into every record at serialization time.
+ * Typically produced by AsyncLocalStorage via `@oresoftware/next-loggers/context`,
+ * but any provider (Angular zones, a framework request object, a plain closure)
+ * can supply one.
+ */
+export interface LogContext {
+  loggedInUser?: LogUser;
+  users?: LogUser[];
+  fields?: LogFields;
+  traceId?: string;
+  traceIds?: string[];
+  routineId?: string;
+  tags?: string[];
+}
+
+export type LogContextProvider = () => LogContext | null | undefined;
+
+/**
+ * Structural contract for Node/Bun/Deno AsyncLocalStorage (and lookalikes such
+ * as zone-backed stores): only getStore() is required, so any implementation
+ * can be attached without this package importing node:async_hooks itself.
+ */
+export interface AsyncLocalStorageLike<T> {
+  getStore(): T | undefined;
+}
+
+let globalLogContextProvider: LogContextProvider | null = null;
+
+/** Registers a process-wide context provider; returns the previous one so callers can restore it. */
+export function setLogContextProvider(
+  provider: LogContextProvider | null,
+): LogContextProvider | null {
+  const previous = globalLogContextProvider;
+  globalLogContextProvider = provider;
+  return previous;
+}
+
+export function getLogContextProvider(): LogContextProvider | null {
+  return globalLogContextProvider;
+}
+
+/** Destination for high-severity records, posted via HTTP independently of other transports. */
+export interface ErrorTrackingOptions {
+  url: string;
+  /** Tried when the priority url fails. */
+  fallbackUrl?: string;
+  /** Lowest level forwarded to the error tracker; defaults to ERROR. */
+  minLevel?: LogLevel | Lowercase<LogLevel>;
+  /**
+   * Skip re-posting records with an identical level/runtime/message/trace hash
+   * (default true, mirroring the original dd loggers). A failed send releases
+   * the hash so the next occurrence retries.
+   */
+  dedupe?: boolean;
+  method?: 'POST' | 'PUT' | 'PATCH';
+  headers?: Record<string, string>;
+  timeoutMillis?: number;
+  keepalive?: boolean;
+  fetch?: typeof fetch;
+  sendBeacon?: (url: string, data?: BodyInit | null) => boolean;
+}
+
 export interface LoggerOptions {
   appName?: string;
   name?: string;
@@ -104,7 +170,16 @@ export interface LoggerOptions {
   transports?: LogTransport | LogTransport[];
   http?: HttpTransportOptions;
   supabase?: SupabaseRealtimeOptions;
+  errorTracking?: ErrorTrackingOptions;
   onTransportError?: (error: unknown, transport: LogTransport, record: LogRecord) => void;
+  /** Per-logger context source; overrides the provider set via setLogContextProvider. */
+  contextProvider?: LogContextProvider;
+  /**
+   * Key substrings replaced with '[REDACTED]' in values/fields/context/meta/errors.
+   * Defaults to DEFAULT_REDACTED_KEY_PATTERNS; pass false to disable entirely.
+   * loggedInUser/users identity blocks are never redacted.
+   */
+  redactKeys?: readonly string[] | false;
   /** Attach delivery to a request lifecycle, such as an Edge execution context. */
   waitUntil?: (promise: Promise<void>) => void;
   /** Attach delivery to Next.js `after()`, without importing Next.js into this package. */
@@ -175,7 +250,37 @@ function randomId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-function serializeError(error: Error, seen: WeakSet<object>): Record<string, SerializedValue> {
+/**
+ * Key substrings redacted from values/fields/context/meta by default, carried
+ * over from the original dd-next-1 logger-5 redaction list. Identity blocks
+ * (loggedInUser/users) are exempt so user correlation keeps working.
+ */
+export const DEFAULT_REDACTED_KEY_PATTERNS: readonly string[] = [
+  'password',
+  'authtoken',
+  'ssn',
+  'bankaccount',
+  'email',
+  'phone',
+  'token',
+  'secret',
+];
+
+type RedactPatterns = readonly string[] | null;
+
+function shouldRedact(key: string, patterns: RedactPatterns): boolean {
+  if (!patterns) {
+    return false;
+  }
+  const lower = key.toLowerCase();
+  return patterns.some((pattern) => lower.includes(pattern));
+}
+
+function serializeError(
+  error: Error,
+  seen: WeakSet<object>,
+  redact: RedactPatterns,
+): Record<string, SerializedValue> {
   const result: Record<string, SerializedValue> = {
     name: error.name,
     message: error.message,
@@ -185,15 +290,19 @@ function serializeError(error: Error, seen: WeakSet<object>): Record<string, Ser
   }
   const errorWithCause = error as Error & { cause?: unknown };
   if (errorWithCause.cause !== undefined) {
-    result.cause = serialize(errorWithCause.cause, seen);
+    result.cause = serialize(errorWithCause.cause, seen, redact);
   }
   for (const key of Object.keys(error)) {
-    result[key] = serialize((error as unknown as Record<string, unknown>)[key], seen);
+    if (shouldRedact(key, redact)) {
+      result[key] = '[REDACTED]';
+      continue;
+    }
+    result[key] = serialize((error as unknown as Record<string, unknown>)[key], seen, redact);
   }
   return result;
 }
 
-function serialize(value: unknown, seen: WeakSet<object>): SerializedValue {
+function serialize(value: unknown, seen: WeakSet<object>, redact: RedactPatterns = null): SerializedValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return value;
   }
@@ -222,7 +331,7 @@ function serialize(value: unknown, seen: WeakSet<object>): SerializedValue {
   seen.add(value);
   try {
     if (value instanceof Error) {
-      return serializeError(value, seen);
+      return serializeError(value, seen, redact);
     }
     if (value instanceof Date) {
       return Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString();
@@ -231,22 +340,28 @@ function serialize(value: unknown, seen: WeakSet<object>): SerializedValue {
       return value.toString();
     }
     if (Array.isArray(value)) {
-      return value.map((item) => serialize(item, seen));
+      return value.map((item) => serialize(item, seen, redact));
     }
     if (value instanceof Map) {
       return Array.from(value.entries(), ([key, entryValue]) => [
-        serialize(key, seen),
-        serialize(entryValue, seen),
+        serialize(key, seen, redact),
+        serialize(entryValue, seen, redact),
       ]);
     }
     if (value instanceof Set) {
-      return Array.from(value, (entryValue) => serialize(entryValue, seen));
+      return Array.from(value, (entryValue) => serialize(entryValue, seen, redact));
     }
 
     const result: Record<string, SerializedValue> = {};
-    for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+    // Object.keys plus guarded access (not Object.entries) so one throwing
+    // getter poisons only its own property, not every sibling.
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      if (shouldRedact(key, redact)) {
+        result[key] = '[REDACTED]';
+        continue;
+      }
       try {
-        result[key] = serialize(entryValue, seen);
+        result[key] = serialize((value as Record<string, unknown>)[key], seen, redact);
       } catch (error) {
         result[key] = `[Unserializable: ${error instanceof Error ? error.message : String(error)}]`;
       }
@@ -265,7 +380,15 @@ export function serializeLogValue(value: unknown): SerializedValue {
   return serialize(value, new WeakSet<object>());
 }
 
-function toMessagePart(value: unknown): string {
+/** serializeLogValue plus '[REDACTED]' for keys matching the given substrings. */
+export function serializeLogValueRedacted(
+  value: unknown,
+  redactKeyPatterns: readonly string[] = DEFAULT_REDACTED_KEY_PATTERNS,
+): SerializedValue {
+  return serialize(value, new WeakSet<object>(), redactKeyPatterns.map((p) => p.toLowerCase()));
+}
+
+function toMessagePart(value: unknown, serializer: (value: unknown) => SerializedValue): string {
   if (typeof value === 'string') {
     return value;
   }
@@ -285,7 +408,7 @@ function toMessagePart(value: unknown): string {
     return String(value);
   }
   try {
-    return JSON.stringify(serializeLogValue(value));
+    return JSON.stringify(serializer(value));
   } catch {
     return String(value);
   }
@@ -324,17 +447,25 @@ export class HttpTransport implements LogTransport {
     this.options = options;
   }
 
-  async write(record: LogRecord): Promise<void> {
+  private get endpoints(): string[] {
+    return this.options.fallbackEndpoint
+      ? [this.options.endpoint, this.options.fallbackEndpoint]
+      : [this.options.endpoint];
+  }
+
+  private async post(endpoint: string, record: LogRecord): Promise<void> {
     const fetchImplementation = this.options.fetch || globalThis.fetch;
     if (typeof fetchImplementation !== 'function') {
       throw new Error('No fetch implementation is available for HttpTransport');
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMillis ?? 15_000);
+    // A timeout of 0 (or negative) disables the abort timer rather than aborting instantly.
+    const timeoutMillis = this.options.timeoutMillis ?? 15_000;
+    const timeout = timeoutMillis > 0 ? setTimeout(() => controller.abort(), timeoutMillis) : undefined;
     try {
-      const response = await fetchImplementation(this.options.endpoint, {
-        method: 'POST',
+      const response = await fetchImplementation(endpoint, {
+        method: this.options.method ?? 'POST',
         headers: {
           'content-type': 'application/json',
           ...this.options.headers,
@@ -348,8 +479,23 @@ export class HttpTransport implements LogTransport {
         throw new Error(`Log endpoint returned ${response.status} ${response.statusText}`);
       }
     } finally {
-      clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
     }
+  }
+
+  async write(record: LogRecord): Promise<void> {
+    let lastError: unknown;
+    for (const endpoint of this.endpoints) {
+      try {
+        await this.post(endpoint, record);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 
   flushOnExit(records: readonly LogRecord[]): void {
@@ -363,12 +509,85 @@ export class HttpTransport implements LogTransport {
     }
     for (const record of records) {
       const body = this.options.mapBody?.(record) ?? JSON.stringify(record);
-      try {
-        beacon(this.options.endpoint, body);
-      } catch {
-        // The original keepalive fetch remains the fallback.
+      for (const endpoint of this.endpoints) {
+        try {
+          if (beacon(endpoint, body)) {
+            break;
+          }
+        } catch {
+          // The original keepalive fetch remains the fallback.
+        }
       }
     }
+  }
+}
+
+function createErrorTrackingTransport(tracking: ErrorTrackingOptions): LogTransport {
+  const inner = new HttpTransport({
+    endpoint: tracking.url,
+    ...(tracking.fallbackUrl ? { fallbackEndpoint: tracking.fallbackUrl } : {}),
+    ...(tracking.method ? { method: tracking.method } : {}),
+    ...(tracking.headers ? { headers: tracking.headers } : {}),
+    ...(tracking.timeoutMillis !== undefined ? { timeoutMillis: tracking.timeoutMillis } : {}),
+    ...(tracking.keepalive !== undefined ? { keepalive: tracking.keepalive } : {}),
+    ...(tracking.fetch ? { fetch: tracking.fetch } : {}),
+    ...(tracking.sendBeacon ? { sendBeacon: tracking.sendBeacon } : {}),
+  });
+  const threshold = LEVEL_INDEX.get(normalizeLevel(tracking.minLevel ?? 'ERROR')) ?? 4;
+  const matches = (record: LogRecord): boolean =>
+    (LEVEL_INDEX.get(record.level) ?? 0) >= threshold;
+
+  const seenHashes = tracking.dedupe === false ? null : new Set<string>();
+  const MAX_HASHES = 5_000;
+  const hashOf = (record: LogRecord): string =>
+    hashString(JSON.stringify([record.level, record.runtime, record.message, record.traceIds ?? []]));
+
+  return {
+    name: 'error-tracking',
+    async write(record) {
+      if (!matches(record)) {
+        return;
+      }
+      if (!seenHashes) {
+        await inner.write(record);
+        return;
+      }
+      const hash = hashOf(record);
+      if (seenHashes.has(hash)) {
+        return;
+      }
+      if (seenHashes.size >= MAX_HASHES) {
+        // Evict the oldest half (Sets iterate in insertion order).
+        let index = 0;
+        for (const existing of seenHashes) {
+          if (index >= MAX_HASHES / 2) {
+            break;
+          }
+          seenHashes.delete(existing);
+          index += 1;
+        }
+      }
+      seenHashes.add(hash);
+      try {
+        await inner.write(record);
+      } catch (error) {
+        seenHashes.delete(hash);
+        throw error;
+      }
+    },
+    flushOnExit: (records) => inner.flushOnExit(records.filter(matches)),
+  };
+}
+
+function assertHttpUrl(url: string, label: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new TypeError(`${label} must be a valid URL, got: ${url}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new TypeError(`${label} must use http(s), got: ${parsed.protocol}`);
   }
 }
 
@@ -771,7 +990,7 @@ export class LogEvent {
       this.stackTrace.push(
         ...stack
           .split('\n')
-          .filter((line) => line && !line.includes('node_modules/next-loggers')),
+          .filter((line) => line && !/node_modules[\\/](@oresoftware[\\/])?next-loggers/.test(line)),
       );
     }
     return this;
@@ -793,11 +1012,32 @@ export class LogEvent {
       return this.record;
     }
 
-    const errors = this.values.filter((value) => value instanceof Error).map(serializeLogValue);
-    const loggerUser = this.logger.getCurrentUser();
-    const loggedInUser = { ...loggerUser, ...this.loggedInUser };
-    const traces = Array.from(this.traceIds);
-    const fields = { ...this.logger.fields, ...this.fields, ...this.logger.getRuntimeFields() };
+    const redacted = (value: unknown): SerializedValue => this.logger.serializeValue(value);
+    const errors = this.values.filter((value) => value instanceof Error).map(redacted);
+    // Merge precedence, lowest to highest: logger state < ambient context < event-level calls.
+    const context = this.logger.getContext();
+    const loggedInUser = {
+      ...this.logger.getCurrentUser(),
+      ...context?.loggedInUser,
+      ...this.loggedInUser,
+    };
+    const users = [...(context?.users ?? []), ...this.users];
+    const traceId = this.traceId || context?.traceId || '';
+    const traces = Array.from(
+      new Set([
+        ...this.traceIds,
+        ...(context?.traceId ? [context.traceId] : []),
+        ...(context?.traceIds ?? []),
+      ]),
+    );
+    const routineId = this.routineId || context?.routineId || '';
+    const tags = Array.from(new Set([...this.tags, ...(context?.tags ?? [])]));
+    const fields = {
+      ...this.logger.fields,
+      ...context?.fields,
+      ...this.fields,
+      ...this.logger.getRuntimeFields(),
+    };
     this.record = {
       schema: 'next-loggers/v1',
       id: this.logger.createId(),
@@ -806,25 +1046,25 @@ export class LogEvent {
       runtime: this.logger.runtime,
       appName: this.logger.appName,
       ...(this.logger.name ? { name: this.logger.name } : {}),
-      message: this.values.map(toMessagePart).join(' '),
-      values: this.values.map(serializeLogValue),
-      fields: serializeLogValue(fields) as Record<string, SerializedValue>,
+      message: this.values.map((value) => toMessagePart(value, redacted)).join(' '),
+      values: this.values.map(redacted),
+      fields: redacted(fields) as Record<string, SerializedValue>,
       ...(Object.keys(loggedInUser).length > 0
         ? { loggedInUser: serializeLogValue(loggedInUser) as Record<string, SerializedValue> }
         : {}),
-      ...(this.users.length > 0
+      ...(users.length > 0
         ? {
-            users: this.users.map(
+            users: users.map(
               (user) => serializeLogValue(user) as Record<string, SerializedValue>,
             ),
           }
         : {}),
-      ...(this.traceId ? { traceId: this.traceId } : {}),
+      ...(traceId ? { traceId } : {}),
       ...(traces.length > 0 ? { traceIds: traces } : {}),
-      ...(this.routineId ? { routineId: this.routineId } : {}),
-      ...(this.tags.size > 0 ? { tags: Array.from(this.tags) } : {}),
-      ...(this.context.length > 0 ? { context: this.context.map(serializeLogValue) } : {}),
-      ...(this.meta.length > 0 ? { meta: this.meta.map(serializeLogValue) } : {}),
+      ...(routineId ? { routineId } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+      ...(this.context.length > 0 ? { context: this.context.map(redacted) } : {}),
+      ...(this.meta.length > 0 ? { meta: this.meta.map(redacted) } : {}),
       ...(errors.length > 0 ? { errors } : {}),
       ...(this.stackTrace.length > 0 ? { stackTrace: this.stackTrace } : {}),
     };
@@ -875,10 +1115,22 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
     if (options.supabase) {
       this.transports.push(new SupabaseRealtimeTransport(options.supabase));
     }
+    if (options.errorTracking) {
+      this.transports.push(createErrorTrackingTransport(options.errorTracking));
+    }
   }
 
   now(): Date {
     return this.options.clock?.() ?? new Date();
+  }
+
+  /** Serializes with this logger's redaction rules applied. */
+  serializeValue(value: unknown): SerializedValue {
+    const redactKeys = this.options.redactKeys ?? DEFAULT_REDACTED_KEY_PATTERNS;
+    if (redactKeys === false) {
+      return serializeLogValue(value);
+    }
+    return serializeLogValueRedacted(value, redactKeys);
   }
 
   createId(): string {
@@ -887,6 +1139,89 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
 
   getCurrentUser(): LogUser {
     return { ...this.currentUser };
+  }
+
+  /**
+   * Attaches an AsyncLocalStorage-like store whose current frame is merged into
+   * every record. Pass `select` when the store's shape is not a LogContext.
+   * Written into options so anew() children inherit the attachment.
+   */
+  setALS<TStore = LogContext>(
+    storage: AsyncLocalStorageLike<TStore>,
+    select?: (store: TStore) => LogContext | null | undefined,
+  ): this {
+    if (!storage || typeof storage.getStore !== 'function') {
+      throw new TypeError(
+        'setALS(storage) requires an AsyncLocalStorage-like object exposing getStore()',
+      );
+    }
+    if (select !== undefined && typeof select !== 'function') {
+      throw new TypeError('setALS(storage, select) requires select to be a function');
+    }
+    return this.setContextProvider(() => {
+      const store = storage.getStore();
+      if (store === undefined || store === null) {
+        return undefined;
+      }
+      return select ? select(store) : (store as unknown as LogContext);
+    });
+  }
+
+  /**
+   * Points high-severity records at an error-tracking endpoint (with optional
+   * fallback, e.g. a Vercel route first and a Google Apps Script collector
+   * second). Written into options so anew() children inherit the destination.
+   */
+  setErrorTracking(tracking: ErrorTrackingOptions): this {
+    if (!tracking || typeof tracking !== 'object') {
+      throw new TypeError('setErrorTracking requires an options object with a url');
+    }
+    assertHttpUrl(tracking.url, 'errorTracking.url');
+    if (tracking.fallbackUrl) {
+      assertHttpUrl(tracking.fallbackUrl, 'errorTracking.fallbackUrl');
+    }
+    (this.options as LoggerOptions).errorTracking = { ...tracking };
+    const transport = createErrorTrackingTransport(tracking);
+    const index = this.transports.findIndex((existing) => existing.name === 'error-tracking');
+    if (index >= 0) {
+      this.transports[index] = transport;
+    } else {
+      this.transports.push(transport);
+    }
+    return this;
+  }
+
+  setErrorTrackingUrl(url: string, tracking: Omit<ErrorTrackingOptions, 'url'> = {}): this {
+    return this.setErrorTracking({ ...tracking, url });
+  }
+
+  setContextProvider(provider: LogContextProvider | null): this {
+    if (provider !== null && typeof provider !== 'function') {
+      throw new TypeError('setContextProvider requires a function or null');
+    }
+    // Deliberate write-through into options so every anew() implementation,
+    // which spreads this.options, carries the provider to child loggers.
+    const options = this.options as LoggerOptions;
+    if (provider) {
+      options.contextProvider = provider;
+    } else {
+      delete options.contextProvider;
+    }
+    return this;
+  }
+
+  /** Resolves ambient context from the per-logger provider, else the global one. Never throws. */
+  getContext(): LogContext | undefined {
+    const provider = this.options.contextProvider ?? getLogContextProvider();
+    if (!provider) {
+      return undefined;
+    }
+    try {
+      const context = provider();
+      return context && typeof context === 'object' ? context : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   getRuntimeFields(): LogFields {
@@ -1066,4 +1401,21 @@ export function createLogger(options: LoggerOptions = {}): BaseLogger {
 }
 
 export const logger = createLogger();
+
+/** Verifies the packed package through r2g's phase-S downstream consumer. */
+export async function r2gSmokeTest(): Promise<boolean> {
+  let delivered = false;
+  const smokeLogger = createLogger({
+    console: false,
+    transports: {
+      write(record) {
+        delivered = record.message === 'next-loggers r2g smoke test';
+      },
+    },
+  });
+
+  await smokeLogger.info('next-loggers r2g smoke test').send();
+  await smokeLogger.close();
+  return delivered;
+}
 export default logger;

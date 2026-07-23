@@ -66,6 +66,51 @@ test('require-send supports configured custom logger names', () => {
   assert.equal(messages.length, 1);
 });
 
+test('require-send handles await, void, optional chaining, and anew children', () => {
+  const messages = lint(`
+    import { createLogger } from '@oresoftware/next-loggers';
+    const log = createLogger();
+    const child = log.anew({ appName: 'child' });
+    void log.info('voided but sent').send();
+    await log.warn('awaited').addTags('a').send();
+    log?.error('optional chain missing');
+    child.info('child missing');
+    child.info('child sent').send();
+  `);
+  assert.equal(messages.length, 2);
+});
+
+test('require-send tracks loggers assigned to object properties', () => {
+  const messages = lint(`
+    import { createLogger } from '@oresoftware/next-loggers';
+    const app = {};
+    app.log = createLogger();
+    app.log.info('missing on property');
+    app.log.info('sent on property').send();
+  `);
+  assert.equal(messages.length, 1);
+});
+
+test('require-send honors configured extra module names', () => {
+  const messages = lint(`
+    import { createLogger } from '@acme/logging';
+    const log = createLogger();
+    log.info('missing');
+  `, { moduleNames: ['@acme/logging'] });
+  assert.equal(messages.length, 1);
+});
+
+test('require-send ignores unrelated modules with identical export names', () => {
+  // Note: variables literally named log/logger/ddlog are always tracked, so
+  // this deliberately uses a neutral name to isolate module detection.
+  const messages = lint(`
+    import { createLogger } from 'some-other-lib';
+    const telemetry = createLogger();
+    telemetry.info('not ours');
+  `);
+  assert.deepEqual(messages, []);
+});
+
 test('recommended flat config enables the warning', () => {
   const recommended = eslintPlugin.configs.recommended;
   const linter = new Linter();
