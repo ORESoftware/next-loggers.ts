@@ -1,7 +1,7 @@
 {
   "name": "@oresoftware/next-loggers",
   "version": "0.1.0",
-  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, and edge workers",
+  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, and edge workers",
   "type": "module",
   "types": "./dist/base-logger.d.ts",
   "sideEffects": false,
@@ -18,8 +18,8 @@
         "default": "./dist/edge-logger.js"
       },
       "workerd": {
-        "types": "./dist/edge-logger.d.ts",
-        "default": "./dist/edge-logger.js"
+        "types": "./dist/cloudflare-worker-logger.d.ts",
+        "default": "./dist/cloudflare-worker-logger.js"
       },
       "worker": {
         "types": "./dist/edge-logger.d.ts",
@@ -57,6 +57,10 @@
       "types": "./dist/edge-logger.d.ts",
       "default": "./dist/edge-logger.js"
     },
+    "./cloudflare": {
+      "types": "./dist/cloudflare-worker-logger.d.ts",
+      "default": "./dist/cloudflare-worker-logger.js"
+    },
     "./node": {
       "types": "./dist/node-logger.d.ts",
       "default": "./dist/node-logger.js"
@@ -74,8 +78,16 @@
         "types": "./dist/context-browser.d.ts",
         "default": "./dist/context-browser.js"
       },
+      "workerd": {
+        "types": "./dist/context-workerd.d.ts",
+        "default": "./dist/context-workerd.js"
+      },
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
+    },
+    "./browser-stream": {
+      "types": "./dist/browser-stream.d.ts",
+      "default": "./dist/browser-stream.js"
     },
     "./config": {
       "types": "./dist/config.d.ts",
@@ -127,7 +139,9 @@
     "supabase",
     "bun",
     "deno",
-    "edge"
+    "edge",
+    "cloudflare-workers",
+    "workerd"
   ],
   "license": "MIT"
 }

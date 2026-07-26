@@ -1,8 +1,6 @@
-import {
-  NodeLogger,
-  r2gSmokeTest,
-  type LogRecord,
-} from '@oresoftware/next-loggers';
+// `base` is the namespace re-export every runtime entry point carries; it holds
+// the shared surface as both values (base.r2gSmokeTest) and types (base.LogRecord).
+import { NodeLogger, base } from '@oresoftware/next-loggers';
 import {
   BaseLogger,
   LogEvent,
@@ -14,6 +12,9 @@ import { BrowserLogger } from '@oresoftware/next-loggers/browser';
 import { BunLogger } from '@oresoftware/next-loggers/bun';
 import { DenoLogger } from '@oresoftware/next-loggers/deno';
 import { EdgeLogger } from '@oresoftware/next-loggers/edge';
+import { CloudflareWorkerLogger } from '@oresoftware/next-loggers/cloudflare';
+
+type LogRecord = base.LogRecord;
 import {
   installLogContextProvider,
   runWithLogContext,
@@ -98,9 +99,14 @@ await nodeLogger.close();
 
 await logger.close();
 
-assert(await r2gSmokeTest(), 'the phase-S smoke export should also pass in the TypeScript consumer');
 assert(
-  [BrowserLogger, EdgeLogger, BunLogger, DenoLogger].every(value => typeof value === 'function'),
+  await base.r2gSmokeTest(),
+  'the phase-S smoke export should also pass in the TypeScript consumer',
+);
+assert(
+  [BrowserLogger, EdgeLogger, CloudflareWorkerLogger, BunLogger, DenoLogger].every(
+    (value) => typeof value === 'function',
+  ),
   'all runtime logger classes should be exported',
 );
 

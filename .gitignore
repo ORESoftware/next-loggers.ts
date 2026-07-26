@@ -11,6 +11,9 @@ dist/
 # Tests and tool caches
 coverage/
 .nyc_output/
+# Generated browser-conformance entry (must live in-package for self-reference)
+.conformance-tmp/
+.wrangler/
 .eslintcache
 .cache/
 

@@ -1,6 +1,6 @@
 # @oresoftware/next-loggers
 
-Dependency-free, ESM-only loggers for Next.js, browsers, edge workers, Node.js, Bun, and Deno. Log events are chainable, safely serialized, and can be sent to HTTP endpoints or streamed over Supabase Realtime WebSockets.
+Dependency-free, ESM-only loggers for Next.js, browsers, edge workers, Cloudflare Workers, Node.js, Bun, and Deno. Log events are chainable, safely serialized, and can be sent to HTTP endpoints or streamed over Supabase Realtime WebSockets.
 
 ## Install
 
@@ -18,17 +18,32 @@ The root import uses package export conditions. Next.js can select `browser`, `e
 import { logger } from '@oresoftware/next-loggers';
 ```
 
-The root covers every shipped runtime: `browser`, `edge-light`/`workerd`/`worker`, `deno`, `bun`, and `node`, followed by the universal base fallback. Every runtime entry re-exports the base contracts and classes.
+The root covers every shipped runtime: `browser`, `edge-light`/`worker`, `workerd` (Cloudflare Workers), `deno`, `bun`, and `node`, followed by the universal base fallback.
 
 Explicit entry points are also available and are recommended when the runtime is known:
 
 ```ts
 import { createBrowserLogger } from '@oresoftware/next-loggers/browser';
 import { createEdgeLogger } from '@oresoftware/next-loggers/edge';
+import { createCloudflareWorkerLogger } from '@oresoftware/next-loggers/cloudflare';
 import { createNodeLogger } from '@oresoftware/next-loggers/node';
 import { createBunLogger } from '@oresoftware/next-loggers/bun';
 import { createDenoLogger } from '@oresoftware/next-loggers/deno';
 import { createLogger } from '@oresoftware/next-loggers/base';
+```
+
+Every runtime entry also re-exports the shared surface as a `base` namespace, so
+the base contracts are reachable without a second import. The namespace carries
+types as well as values:
+
+```ts
+import { createEdgeLogger, base } from '@oresoftware/next-loggers/edge';
+
+const transport: base.LogTransport = {
+  write(record: base.LogRecord) {
+    void base.serializeLogValue(record.values);
+  },
+};
 ```
 
 ## Basic use
@@ -276,6 +291,132 @@ const log = createEdgeLogger({
 
 void log.warn('request blocked').send();
 ```
+
+## Streaming browser logs over a WebSocket
+
+`BrowserStreamTransport` keeps a persistent socket open and ships records in
+batches. It exists because a browser tab needs three things a per-record
+transport does not give you: batching (a chatty page emits hundreds of records a
+second), a bounded queue that survives disconnects (tab sleep and proxy resets
+are normal), and a last-gasp flush on `pagehide`, where async sends are
+unreliable.
+
+```ts
+import { createBrowserLogger } from '@oresoftware/next-loggers/browser';
+
+const log = createBrowserLogger({
+  appName: 'web',
+  includeDeviceContext: true,
+  captureGlobalErrors: true,
+  captureUnhandledRejections: true,
+  captureCspViolations: true,
+  stream: {
+    url: 'wss://logs.example.com/ingest',
+    batchSize: 120,
+    flushIntervalMillis: 2_500,
+    urgentFlushDelayMillis: 250,
+    maxQueueSize: 2_000,
+    beaconUrl: 'https://logs.example.com/ingest-beacon',
+  },
+});
+
+await log.error('checkout failed', err).send();
+```
+
+ERROR and FATAL flush on the short delay; everything else rides the idle
+cadence. When the queue is full the oldest records are dropped and counted —
+read `log.streamTransport.dropped` rather than assuming nothing was lost.
+
+The destination is pluggable. Point `url` at any WebSocket collector, or hand it
+an existing transport to get only the batching and buffering policy:
+
+```ts
+import { SupabaseRealtimeTransport } from '@oresoftware/next-loggers/base';
+import { createBrowserStreamTransport } from '@oresoftware/next-loggers/browser-stream';
+
+const stream = createBrowserStreamTransport({
+  transport: new SupabaseRealtimeTransport({ url, anonKey }),
+  batchSize: 50,
+});
+```
+
+## Serialization limits
+
+Every record is serialized under caps, so one oversized payload cannot take down
+the process it was meant to diagnose. Truncation is always marked, never silent.
+
+```ts
+const log = createNodeLogger({
+  limits: {
+    maxStringLength: 20_000, // strings → 'xxx…[truncated N chars]'
+    maxDepth: 12,            // deeper → '[Max depth 12 exceeded]'
+    maxArrayLength: 1_000,   // arrays/Sets/Maps → trailing '[+N more of M]'
+    maxProperties: 200,      // objects → '__truncatedKeys: N'
+  },
+});
+```
+
+Defaults live in `DEFAULT_SERIALIZE_LIMITS`.
+
+## Async context across runtimes
+
+`@oresoftware/next-loggers/context` resolves per runtime. `AsyncLocalStorage`
+works on Node, Bun, Deno and Vercel Edge; Cloudflare Workers only provide it
+behind `compatibility_flags = ["nodejs_als"]`, and browsers never do. Rather
+than crash at import on an unflagged Worker, those builds fall back to a
+single-frame store that **cannot** isolate concurrent async flows — so check
+before relying on per-request isolation:
+
+```ts
+import { isAsyncContextTracked, runWithLogContext } from '@oresoftware/next-loggers/context';
+
+if (!isAsyncContextTracked()) {
+  // Single-frame fallback: overlapping requests can observe each other's context.
+}
+```
+
+## Cloudflare Workers
+
+`@oresoftware/next-loggers/cloudflare` is what the `workerd` export condition
+selects, so a plain root import already resolves to it inside a Worker. It adds
+Workers-specific record fields on top of the edge behaviour: `rayId` from
+`cf-ray`, the colo/geo/network properties off `request.cf`, and cron metadata on
+scheduled invocations.
+
+A module-scope logger outlives the request but has no `ctx`, so bind it per
+invocation with `forRequest()` / `forScheduled()` — otherwise delivery races the
+isolate going idle:
+
+```ts
+import { createCloudflareWorkerLogger } from '@oresoftware/next-loggers/cloudflare';
+
+const log = createCloudflareWorkerLogger({
+  appName: 'orders-worker',
+  http: { endpoint: 'https://logs.example.com/collect' },
+  envFields: ['ENVIRONMENT'],
+});
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const requestLog = log.forRequest(request, ctx, env);
+    await requestLog.info('order received').send();
+    return new Response('ok');
+  },
+
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    await log.forScheduled(controller, ctx, env).info('reconcile started').send();
+  },
+};
+```
+
+`envFields` copies only string/number/boolean vars — KV/R2/D1/Durable Object
+bindings are skipped — and the values still pass through redaction, so a var
+named `API_TOKEN` is masked. `request.cf` properties can be turned off with
+`includeCfProperties: false`; the `cf-connecting-ip` client address is omitted
+unless you opt in with `includeClientIp: true`.
+
+The Workers types are matched structurally, so this package still has no
+dependency on `@cloudflare/workers-types`.
 
 For Next.js `after()`, pass it without making this package depend on Next:
 
