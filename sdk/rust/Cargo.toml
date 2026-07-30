@@ -1,0 +1,19 @@
+[package]
+name = "oresoftware-next-loggers"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Rust implementation of the next-loggers/v1 contract"
+license = "MIT"
+repository = "https://github.com/ORESoftware/next-loggers.ts"
+readme = "README.md"
+keywords = ["logging", "structured-logging", "supabase"]
+
+[lib]
+name = "next_loggers"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "=0.3.36", features = ["formatting"] }

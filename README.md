@@ -10,6 +10,35 @@ npm install @oresoftware/next-loggers
 
 The package intentionally does not ship a CommonJS build. It works from `.mjs` files and ESM TypeScript projects.
 
+## Polyglot SDKs
+
+The repository also contains native logger libraries for services that feed
+the same logging pipeline:
+
+| Language | Source package |
+| --- | --- |
+| Python | [`sdk/python`](sdk/python) |
+| Go | [`sdk/go`](sdk/go) |
+| Rust | [`sdk/rust`](sdk/rust) |
+| Gleam | [`sdk/gleam`](sdk/gleam) |
+
+All implementations emit the strict `next-loggers/v1` wire record in
+[`contracts/log-record.schema.json`](contracts/log-record.schema.json). They
+share levels, chainable event enrichment, idempotent `send`, transport
+lifecycle hooks, minimum-level filtering, and recovery of unsent events during
+`flush_on_exit`/`close`. Public logger, event, record, options, level, and
+transport types are exported so applications can subclass, embed, wrap, or
+compose them according to the language.
+
+Run every native conformance suite with:
+
+```sh
+npm run test:polyglot
+```
+
+Each SDK also includes an `r2g` downstream-consumer skeleton so its packaged
+artifact can be tested as a dependency, not only from its own source tree.
+
 ## Runtime entry points
 
 The root import uses package export conditions. Next.js can select `browser`, `edge-light`, or `node`; Deno and Bun select their own conditions.

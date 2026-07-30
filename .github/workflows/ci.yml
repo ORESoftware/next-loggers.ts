@@ -32,6 +32,33 @@ jobs:
           path: dist
           retention-days: 1
 
+  # ── Native SDKs sharing the next-loggers/v1 wire contract ────────────────
+  polyglot:
+    name: python, go, rust & gleam
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          gleam-version: "1.17.0"
+      - run: cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
+      - run: gleam format --check src test
+        working-directory: sdk/gleam
+      - run: npm run test:polyglot
+
   # ── Node LTS matrix ───────────────────────────────────────────────────────
   node:
     name: node ${{ matrix.node }}
