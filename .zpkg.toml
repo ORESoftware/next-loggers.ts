@@ -1,0 +1,63 @@
+# zed-pkg manifest — https://zpkg.tech
+#
+# This package is published to BOTH npm (@oresoftware/next-loggers) and the
+# zpkg registry (oresoftware/next-loggers). Note the name differs: zpkg org and
+# package names must match [a-z0-9][a-z0-9-]*[a-z0-9], so the repository's
+# trailing ".ts" cannot appear here.
+#
+# Publishing requires a matching VCS tag (publish.tag_format) at HEAD, and
+# `zed pack` walks the filesystem rather than the VCS index — so `npm run build`
+# must run first or the artifact ships without dist/.
+
+[package]
+org = "oresoftware"
+name = "next-loggers"
+version = "0.1.0"
+description = "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, and edge workers"
+license = "MIT"
+keywords = ["logging", "nextjs", "esm", "supabase", "bun", "deno", "edge", "cloudflare-workers", "workerd"]
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/ORESoftware/next-loggers.ts"
+
+[dependencies]
+# Intentionally empty: this package has zero runtime dependencies on every
+# registry it ships to. Keep it that way.
+
+# Hoisted into zed_modules/.bin/ on install; run with `zed run next-loggers`.
+# The path is relative to the package root and must exist in the artifact,
+# which is why dist/ has to be built before packing.
+[bin]
+next-loggers = "dist/cli/main.js"
+
+# Consumers get node_modules/@oresoftware/next-loggers linked alongside
+# zed_modules/, so the import specifier is identical whether the package was
+# installed from npm or from the zpkg registry.
+[install]
+adapter = "node"
+
+[publish]
+# The README is the package's documentation; zed strips READMEs by default.
+include_readme = true
+tag_format = "v{version}"
+# Defaults already strip tests/**, .github/**, .zed/**, .zpkg.lock and
+# node_modules/**. These are the remaining development-only paths that would
+# otherwise ride along into the artifact.
+exclude = [
+  ".r2g/**",
+  "docs/**",
+  ".conformance-tmp/**",
+  "wrangler.conformance.toml",
+  "tsconfig*.json",
+  "package-lock.json",
+  "*.tgz",
+  ".gitignore",
+]
+# Run by `zed r2g` from inside the mock consumer project, with
+# ZED_PKG_TEST_TARGET pointing at the installed package directory. Exercises
+# the published artifact through the same bin a consumer would run.
+smoke_test = "node \"$ZED_PKG_TEST_TARGET/dist/cli/main.js\" smoke --depth full"
+
+[scripts]
+test = "npm test"

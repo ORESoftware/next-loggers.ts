@@ -292,6 +292,84 @@ const log = createEdgeLogger({
 void log.warn('request blocked').send();
 ```
 
+## CLI
+
+The package ships a `next-loggers` executable.
+
+```sh
+npx next-loggers doctor          # will logging behave correctly here?
+npx next-loggers resolve --runtime workerd
+npx next-loggers smoke --depth full
+your-app | npx next-loggers pretty
+```
+
+| Command | What it does |
+| --- | --- |
+| `doctor` | Reports runtime, **whether async context is really tracked**, config discovery, effective level, and platform capabilities. `--strict` turns warnings into exit 1. |
+| `resolve` | Walks the package's own `exports` map for a condition set and prints what each subpath resolves to — for *any* runtime, from any host. |
+| `smoke` | Imports an installed build and verifies it. This is the `zed r2g` entry point and the only automatic guard against publishing a stale `dist/`. |
+| `pretty` | Renders `next-loggers/v1` NDJSON from stdin. Non-JSON lines pass through untouched, so it is safe at the end of any pipeline. |
+| `flags` | Prints the flag/env contract; `--check` fails on drift. |
+
+`doctor` exists for one reason above the others: when the single-frame context
+fallback is active, concurrent requests can observe each other's context, and
+nothing surfaces that at runtime. `resolve` answers the question behind the
+shipped bug recorded in [docs/AUDIT.md](docs/AUDIT.md) — a missing `workerd`
+condition on `./context`:
+
+```sh
+$ next-loggers resolve --runtime workerd --subpath ./context
+conditions: workerd, worker, import, default
+  ./context  →  ./dist/context-workerd.js
+```
+
+### Flags are environment variables
+
+Following the [flags-2-env](https://github.com/oresoftware/flags-2-env)
+convention, every flag has an environment variable, declared in
+[`.cli-flags.toml`](.cli-flags.toml). The library-contract flags write the same
+`NEXT_LOGGER_*` variables [`src/config.ts`](src/config.ts) reads, so a flag and
+its variable are genuinely interchangeable:
+
+```sh
+next-loggers doctor --max-level debug
+NEXT_LOGGER_MAX_LEVEL=debug next-loggers doctor
+```
+
+The CLI does **not** parse that file at runtime — flags-2-env's Node client is
+an N-API addon needing a C toolchain, and this package ships zero runtime
+dependencies. `src/cli/spec.ts` declares the same contract in TypeScript and
+`tests/cli-flags.test.mjs` asserts the two never drift in either direction
+(`next-loggers flags --check` runs the same comparison). This mirrors zed-cli,
+which keeps clap as its parser and `.cli-flags.toml` as the portable contract.
+
+Two deviations from upstream semantics, both documented in the TOML header: a
+declared default never outranks a real environment variable (upstream lets it,
+which here would fabricate configuration the user never wrote), and `array`
+flags are repeatable.
+
+## Installing with zed-pkg
+
+The package publishes to both npm and the [zed-pkg](https://zpkg.tech)
+registry, declared in [`.zpkg.toml`](.zpkg.toml):
+
+```sh
+zed add oresoftware/next-loggers
+```
+
+The org/name pair composes to the npm name, and the `node` adapter links
+`node_modules/@oresoftware/next-loggers`, so the import specifier is identical
+whichever registry it came from. Note the zpkg name is `next-loggers`, not
+`next-loggers.ts` — package names must match `[a-z0-9][a-z0-9-]*[a-z0-9]`.
+
+Releasing requires a matching `v{version}` tag at HEAD. **Build first:**
+`zed pack` walks the filesystem rather than the VCS index, and publishing a
+missing `dist/` is only a warning — `zed r2g` is what catches it:
+
+```sh
+npm run build && zed r2g && zed publish
+```
+
 ## Streaming browser logs over a WebSocket
 
 `BrowserStreamTransport` keeps a persistent socket open and ships records in

@@ -163,6 +163,70 @@ jobs:
       # reaches the client bundle, and streams records over a real WebSocket.
       - run: node tests/conformance/run-browser.mjs
 
+  # ── CLI contract + zed-pkg manifest ───────────────────────────────────────
+  cli:
+    name: cli & zpkg manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - run: node -e "require('node:fs').chmodSync('dist/cli/main.js', 0o755)"
+      # The same drift comparison the test runs, exercised through the bin so
+      # a consumer's invocation path is covered too.
+      - name: flag/env contract has not drifted
+        run: node dist/cli/main.js flags --check
+      - name: the installed build verifies itself
+        run: node dist/cli/main.js smoke --depth full
+      - name: exports resolve for every runtime
+        run: |
+          for runtime in node bun deno browser workerd edge-light; do
+            node dist/cli/main.js resolve --runtime "$runtime" >/dev/null \
+              || { echo "resolve failed for $runtime"; exit 1; }
+          done
+          # The regression recorded in docs/AUDIT.md: a Worker without
+          # nodejs_als must not be sent to the node:async_hooks build.
+          resolved=$(node dist/cli/main.js resolve --runtime workerd --subpath ./context --json)
+          echo "$resolved"
+          echo "$resolved" | grep -q 'context-workerd.js'
+      - name: pretty round-trips NDJSON losslessly
+        run: |
+          printf '%s\n' '{"schema":"next-loggers/v1","id":"1","timestamp":"2026-01-01T00:00:00.000Z","level":"ERROR","runtime":"node","appName":"ci","message":"hello","values":["hello"],"fields":{}}' \
+            | node dist/cli/main.js pretty --output json \
+            | grep -q '"message":"hello"'
+
+  zed:
+    name: zed pack & r2g
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Build rather than downloading dist/, because the point of this job is
+      # to prove the release path (build → pack → install → smoke) works.
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install the zed CLI
+        run: cargo install --git https://github.com/zed-pkg/zed-cli --locked zed-cli
+      - name: pack and roundtrip-test the artifact
+        run: |
+          zed pack
+          # r2g publishes to a throwaway file:// registry, installs into a mock
+          # consumer, and runs publish.smoke_test against the real artifact.
+          zed r2g --clean
+
   # ── Packed-package consumer (what npm users actually install) ─────────────
   package:
     name: packed package consumer

@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+# zed-pkg: dependency tree and scratch output. .zpkg.lock is COMMITTED —
+# `zed install --frozen` requires it even at zero dependencies.
+zed_modules/
+.zed/
 
 # Build and framework output
 dist/
