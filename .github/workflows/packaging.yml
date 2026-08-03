@@ -54,6 +54,7 @@ jobs:
           otp-version: "28"
           elixir-version: "1.19.0"
           gleam-version: "1.17.0"
+          rebar3-version: "3.27.0"
 
       - name: Install JavaScript and Python packaging tools
         run: |

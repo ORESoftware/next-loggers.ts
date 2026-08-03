@@ -277,6 +277,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "28"
+          rebar3-version: "3.27.0"
       - run: node scripts/verify-release-tag.mjs erlang
       - run: bash test.sh
         working-directory: sdk/erlang
