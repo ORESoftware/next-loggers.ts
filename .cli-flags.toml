@@ -265,14 +265,14 @@ env = "NEXT_LOGGER_CLI_PACKAGE_TARGETS"
 aliases = ["target"]
 short = "t"
 type = "array"
-help = "Release target to show; repeatable (zed|nodejs|python|golang|rust|wasm|java|dart|ruby|gleam|erlang|elixir)."
+help = "Release target filter; repeatable. See the detailed CLI documentation."
 
 [commands.packages.flags.registry]
 env = "NEXT_LOGGER_CLI_PACKAGE_REGISTRIES"
 aliases = ["registry"]
 short = "R"
 type = "array"
-help = "Registry to show; repeatable (zed-pkg|npm|pypi|go-modules|crates-io|maven-central|pub.dev|rubygems|hex)."
+help = "Registry filter; repeatable. See the detailed CLI documentation."
 
 [commands.packages.flags.release_version]
 env = "NEXT_LOGGER_CLI_RELEASE_VERSION"
