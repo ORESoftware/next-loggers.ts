@@ -309,7 +309,7 @@ export const COMMANDS: CommandSpec[] = [
         aliases: ['target'],
         short: 't',
         type: 'array',
-        help: 'Release target to show; repeatable (zed|nodejs|python|golang|rust|wasm|java|dart|ruby|gleam|erlang|elixir).',
+        help: 'Release target filter; repeatable. See the detailed CLI documentation.',
       },
       {
         key: 'registry',
@@ -317,7 +317,7 @@ export const COMMANDS: CommandSpec[] = [
         aliases: ['registry'],
         short: 'R',
         type: 'array',
-        help: 'Registry to show; repeatable (zed-pkg|npm|pypi|go-modules|crates-io|maven-central|pub.dev|rubygems|hex).',
+        help: 'Registry filter; repeatable. See the detailed CLI documentation.',
       },
       {
         key: 'release_version',
