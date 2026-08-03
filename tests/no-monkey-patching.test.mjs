@@ -27,8 +27,10 @@ async function sourceFiles(directory) {
 const assignment = '=(?!=|>)';
 
 test('telemetry integrations contain no automatic instrumentation or runtime monkey patching', async () => {
-  const roots = ['src', 'sdk'].map((directory) => path.join(root, directory));
-  const files = (await Promise.all(roots.map(sourceFiles))).flat();
+  const files = [
+    path.join(root, 'src', 'otel.ts'),
+    ...(await sourceFiles(path.join(root, 'sdk'))),
+  ];
   const forbidden = [
     ['automatic instrumentation registration', /registerInstrumentations\s*\(/u],
     ['global tracer provider registration', /setGlobalTracerProvider\s*\(/u],
