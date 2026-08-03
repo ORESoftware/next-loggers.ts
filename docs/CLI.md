@@ -56,6 +56,10 @@ next-loggers packages --registry crates-io
 
 `--target` and `--registry` are repeatable. Multiple filters within one category are ORed; target and registry categories are combined with AND.
 
+`--release-version` accepts strict Semantic Versioning 2.0.0 without a leading `v`. Numeric core and numeric prerelease identifiers may not contain leading zeroes; prerelease and build identifiers may contain only ASCII alphanumerics and hyphens. Examples such as `1.2.3`, `1.2.3-rc.1`, and `1.2.3-rc.1+build.5` are valid. Values such as `v1.2.3`, `01.2.3`, `1.2.3-01`, and `1.2.3-alpha..1` fail before a release plan is rendered.
+
+The CLI and `scripts/verify-release-tag.mjs` intentionally carry the same strict expression. Tests compare their regular-expression sources exactly and exercise the accepted/rejected corpus in both paths, so planning and publication cannot silently disagree.
+
 ### Machine-readable and drift-checking plans
 
 ```sh
@@ -95,7 +99,7 @@ The complete release-planning variables are:
 | --- | --- | --- |
 | `--target` | `NEXT_LOGGER_CLI_PACKAGE_TARGETS` | repeatable array |
 | `--registry` | `NEXT_LOGGER_CLI_PACKAGE_REGISTRIES` | repeatable array |
-| `--release-version` | `NEXT_LOGGER_CLI_RELEASE_VERSION` | semantic-version string |
+| `--release-version` | `NEXT_LOGGER_CLI_RELEASE_VERSION` | strict SemVer 2.0.0 string |
 | `--check` | `NEXT_LOGGER_CLI_PACKAGES_CHECK` | boolean |
 | `--json` | `NEXT_LOGGER_CLI_JSON` | boolean |
 | `--quiet` | `NEXT_LOGGER_CLI_QUIET` | boolean |
@@ -110,6 +114,8 @@ node dist/cli/main.js flags --check
 node dist/cli/main.js packages --check
 ```
 
-The packaging workflow additionally builds `flags-2-env` from an immutable commit and runs its canonical audit against `.cli-flags.toml`. This catches TOML/schema behavior that the package's strict dependency-free reader does not attempt to implement, while the local bidirectional comparison catches drift between the portable document and the actual executable.
+The packaging workflow additionally builds `flags-2-env` from an immutable commit and runs its canonical audit against `.cli-flags.toml`. It renders root and subcommand help in wide and narrow pseudo-terminals, executes generated Bash completion, registers generated Zsh completion through `compinit`, and installs both shell integrations twice to prove idempotency. This catches TOML/schema and shell-generation behavior that the package's strict dependency-free reader does not attempt to implement, while the local bidirectional comparison catches drift between the portable document and the actual executable.
+
+The release-planner hardening suite also invokes `scripts/verify-release-tag.mjs` for all 12 release routes with the exact current tag and a deliberately moved tag. Exact tags must pass; every moved tag must fail before any registry upload step.
 
 Registry credentials, OIDC publishers, version-bump locations, tag creation, and failure handling are documented in [`docs/RELEASING.md`](RELEASING.md).
