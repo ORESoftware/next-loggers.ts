@@ -157,18 +157,37 @@ await waitFor('Loki correlated log lookup', async () => {
 });
 
 await waitFor('Prometheus scrape targets', async () => {
-  const query = encodeURIComponent('up{job=~"prometheus|otel-collector-internal|otel-collector-exported-metrics|loki|tempo"}');
-  const response = await request(`${urls.prometheus}/api/v1/query?query=${query}`);
-  const value = await response.json();
-  const results = value.data?.result ?? [];
-  const healthy = new Map(results.map((entry) => [entry.metric.job, entry.value?.[1]]));
-  return [
+  const expectedJobs = [
     'prometheus',
     'otel-collector-internal',
     'otel-collector-exported-metrics',
     'loki',
     'tempo',
-  ].every((job) => healthy.get(job) === '1');
+  ];
+  const query = encodeURIComponent(`up{job=~"${expectedJobs.join('|')}"}`);
+  const response = await request(`${urls.prometheus}/api/v1/query?query=${query}`);
+  const value = await response.json();
+  assert.equal(value.status, 'success');
+  const results = value.data?.result ?? [];
+  const healthy = new Map(results.map((entry) => [entry.metric.job, entry.value?.[1]]));
+  const unhealthyJobs = expectedJobs.filter((job) => healthy.get(job) !== '1');
+  if (unhealthyJobs.length === 0) {
+    return true;
+  }
+
+  const targetsResponse = await request(`${urls.prometheus}/api/v1/targets?state=active`);
+  const targetsValue = await targetsResponse.json();
+  const diagnostics = (targetsValue.data?.activeTargets ?? [])
+    .filter((target) => expectedJobs.includes(target.labels?.job ?? target.discoveredLabels?.job))
+    .map((target) => ({
+      job: target.labels?.job ?? target.discoveredLabels?.job,
+      health: target.health,
+      lastError: target.lastError,
+      scrapeUrl: target.scrapeUrl,
+    }));
+  throw new Error(
+    `unhealthy Prometheus targets: ${JSON.stringify({ unhealthyJobs, diagnostics })}`,
+  );
 });
 
 const authorization = `Basic ${Buffer.from(`${grafanaUser}:${grafanaPassword}`).toString('base64')}`;

@@ -12,10 +12,12 @@ scrape_configs:
       - targets: [prometheus:9090]
 
   - job_name: otel-collector-internal
+    fallback_scrape_protocol: PrometheusText0.0.4
     static_configs:
       - targets: [otel-collector:8888]
 
   - job_name: otel-collector-exported-metrics
+    fallback_scrape_protocol: PrometheusText0.0.4
     static_configs:
       - targets: [otel-collector:9464]
 

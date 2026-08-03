@@ -63,8 +63,20 @@ for (const required of ['service.name', 'service.namespace', 'deployment.environ
 assert.match(tempo, /processors:\s+\[span-metrics, service-graphs\]/u);
 assert.match(tempo, /send_exemplars:\s+true/u);
 assert.match(tempo, /block_retention:\s+168h/u);
-assert.match(prometheus, /otel-collector:8888/u);
-assert.match(prometheus, /otel-collector:9464/u);
+
+function scrapeJob(name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return prometheus.match(
+    new RegExp(`- job_name:\\s+${escaped}\\n[\\s\\S]*?(?=\\n\\s*- job_name:|$)`, 'u'),
+  )?.[0] ?? '';
+}
+
+const collectorInternalJob = scrapeJob('otel-collector-internal');
+assert.match(collectorInternalJob, /fallback_scrape_protocol:\s+PrometheusText0\.0\.4/u);
+assert.match(collectorInternalJob, /otel-collector:8888/u);
+const collectorExportedMetricsJob = scrapeJob('otel-collector-exported-metrics');
+assert.match(collectorExportedMetricsJob, /fallback_scrape_protocol:\s+PrometheusText0\.0\.4/u);
+assert.match(collectorExportedMetricsJob, /otel-collector:9464/u);
 assert.match(compose, /--web\.enable-remote-write-receiver/u);
 
 assert.match(datasources, /matcherType:\s+label/u);
