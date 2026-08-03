@@ -11,6 +11,17 @@ dist/
 .turbo/
 .vercel/
 *.tsbuildinfo
+# Generated npm release slice; package.json and .zpkg-smoke.sh remain tracked.
+sdk/nodejs/dist/
+sdk/nodejs/src/
+sdk/nodejs/README.md
+sdk/nodejs/LICENSE
+sdk/nodejs/.cli-flags.toml
+sdk/java/target/
+sdk/dart/.dart_tool/
+sdk/erlang/_build/
+sdk/elixir/_build/
+sdk/elixir/deps/
 
 # Tests and tool caches
 coverage/
@@ -30,11 +41,15 @@ coverage.out
 
 # Package artifacts and logs
 *.tgz
+*.tar
+*.tar.gz
+*.gem
 *.whl
 *.egg-info/
 sdk/python/build/
 sdk/python/dist/
 sdk/rust/target/
+sdk/wasm/target/
 sdk/gleam/build/
 *.log
 npm-debug.log*
