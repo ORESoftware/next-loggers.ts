@@ -82,7 +82,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
-          cache-dependency-path: sdk/go/go.sum
+          cache: false
       - name: Format check
         working-directory: sdk/go
         run: test -z "$(gofmt -l .)"
@@ -132,7 +132,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: none
       - name: Compile with all warnings as errors and run both suites
         working-directory: sdk/java
         run: sh test.sh
@@ -180,7 +179,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "28"
-          elixir-version: "1.19"
+          elixir-version: "1.18"
       - name: Erlang compile and EUnit
         working-directory: sdk/erlang
         run: sh test.sh
