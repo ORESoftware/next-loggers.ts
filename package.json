@@ -93,6 +93,10 @@
       "types": "./dist/browser-stream.d.ts",
       "default": "./dist/browser-stream.js"
     },
+    "./otel": {
+      "types": "./dist/otel.d.ts",
+      "default": "./dist/otel.js"
+    },
     "./config": {
       "types": "./dist/config.d.ts",
       "default": "./dist/config.js"
@@ -142,6 +146,11 @@
   },
   "keywords": [
     "logging",
+    "opentelemetry",
+    "otel",
+    "loki",
+    "prometheus",
+    "grafana",
     "nextjs",
     "esm",
     "supabase",
