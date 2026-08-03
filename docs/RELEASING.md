@@ -4,22 +4,44 @@
 
 ## Package and tag matrix
 
-| Target | Registry identity | Release tag |
-| --- | --- | --- |
-| Zed package family | `oresoftware/next-loggers` plus the target packages declared in `.zpkg.toml` | `vX.Y.Z` |
-| JavaScript / TypeScript | npm `@oresoftware/next-loggers` | `sdk/nodejs/vX.Y.Z` |
-| Python | PyPI `oresoftware-next-loggers` | `sdk/python/vX.Y.Z` |
-| Go | `github.com/ORESoftware/next-loggers.ts/sdk/go` | `sdk/go/vX.Y.Z` |
-| Rust | crates.io `oresoftware-next-loggers` | `sdk/rust/vX.Y.Z` |
-| Rust / WASM | crates.io `oresoftware-next-loggers-wasm` | `sdk/wasm/vX.Y.Z` |
-| Java | Maven Central `io.github.oresoftware:next-loggers` | `sdk/java/vX.Y.Z` |
-| Dart / Flutter | pub.dev `oresoftware_next_loggers` | `sdk/dart/vX.Y.Z` |
-| Ruby | RubyGems `oresoftware-next-loggers` | `sdk/ruby/vX.Y.Z` |
-| Gleam | Hex `oresoftware_next_loggers` | `sdk/gleam/vX.Y.Z` |
-| Erlang | Hex `oresoftware_next_loggers_erlang` | `sdk/erlang/vX.Y.Z` |
-| Elixir | Hex `oresoftware_next_loggers_elixir` | `sdk/elixir/vX.Y.Z` |
+| Target | Registry identity | Release tag | GitHub environment |
+| --- | --- | --- | --- |
+| Zed package family | `oresoftware/next-loggers` plus the target packages declared in `.zpkg.toml` | `vX.Y.Z` | `zed-pkg` |
+| JavaScript / TypeScript | npm `@oresoftware/next-loggers` | `sdk/nodejs/vX.Y.Z` | `npm` |
+| Python | PyPI `oresoftware-next-loggers` | `sdk/python/vX.Y.Z` | `pypi` |
+| Go | `github.com/ORESoftware/next-loggers.ts/sdk/go` | `sdk/go/vX.Y.Z` | `go-modules` |
+| Rust | crates.io `oresoftware-next-loggers` | `sdk/rust/vX.Y.Z` | `crates-io` |
+| Rust / WASM | crates.io `oresoftware-next-loggers-wasm` | `sdk/wasm/vX.Y.Z` | `crates-io` |
+| Java | Maven Central `io.github.oresoftware:next-loggers` | `sdk/java/vX.Y.Z` | `maven-central` |
+| Dart / Flutter | pub.dev `oresoftware_next_loggers` | `sdk/dart/vX.Y.Z` | `pub.dev` |
+| Ruby | RubyGems `oresoftware-next-loggers` | `sdk/ruby/vX.Y.Z` | `rubygems` |
+| Gleam | Hex `oresoftware_next_loggers` | `sdk/gleam/vX.Y.Z` | `hex` |
+| Erlang | Hex `oresoftware_next_loggers_erlang` | `sdk/erlang/vX.Y.Z` | `hex` |
+| Elixir | Hex `oresoftware_next_loggers_elixir` | `sdk/elixir/vX.Y.Z` | `hex` |
 
 The Go tag prefix is part of the Go module protocol for a module rooted in `sdk/go`; do not shorten it to `vX.Y.Z`.
+
+## Inspecting the release catalog
+
+The dependency-free CLI embeds the reviewed package matrix and exposes it through the flags-2-env contract:
+
+```sh
+# Human-readable current-version matrix.
+next-loggers packages
+
+# JSON suitable for release scripts.
+next-loggers packages --json
+
+# Select releases without changing any package or creating any tag.
+next-loggers packages --target nodejs --target golang --release-version 0.2.0
+
+# In a repository checkout, compare the catalog to package.json and .zpkg.toml.
+next-loggers packages --check
+```
+
+The equivalent environment variables are `NEXT_LOGGER_CLI_PACKAGE_TARGETS`, `NEXT_LOGGER_CLI_PACKAGE_REGISTRIES`, `NEXT_LOGGER_CLI_RELEASE_VERSION`, and `NEXT_LOGGER_CLI_PACKAGES_CHECK`. Repeatable target and registry values use JSON-array strings when supplied through the environment. See [`docs/CLI.md`](CLI.md) for examples and the full portable contract.
+
+`packages --check` is read-only and fail-closed. It detects changes to the root Zed identity, root tag format, exact target set, target directories, native registry names, native package identities, and native tag formats. Gleam, Erlang, and Elixir are also checked to ensure they remain first-class Zed targets without pretending Zed currently supplies a native Hex mirror adapter.
 
 ## Version policy
 
@@ -42,9 +64,11 @@ Then run:
 npm ci
 npm run release:check
 npm run test:polyglot
+node dist/cli/main.js flags --check
+node dist/cli/main.js packages --check
 ```
 
-The packaging workflow adds native dry runs for npm, PyPI, Cargo, Maven, pub.dev, RubyGems, and all three Hex packages. It also runs `zed release preflight`, `zed pack`, and a full `zed r2g` consumer roundtrip.
+The packaging workflow adds native dry runs for npm, PyPI, Cargo, Maven, pub.dev, RubyGems, and all three Hex packages. It also runs the canonical flags-2-env audit, `zed release preflight`, `zed pack`, and a full `zed r2g` consumer roundtrip.
 
 ## First-time registry setup
 
@@ -87,9 +111,10 @@ Zed currently has no native Hex mirror adapter, so Gleam, Erlang, and Elixir rem
 ## Creating a release
 
 1. Merge a version bump whose normal CI and `Polyglot packaging` workflow are green.
-2. Create only the tags for the registries intended for this release.
-3. Push tags without moving or reusing an existing published tag.
-4. Inspect the corresponding `Release native package` or `Release Zed packages` run.
+2. Run `next-loggers packages --check --release-version X.Y.Z` in the reviewed checkout.
+3. Create only the tags for the registries intended for this release.
+4. Push tags without moving or reusing an existing published tag.
+5. Inspect the corresponding `Release native package` or `Release Zed packages` run.
 
 Examples:
 

@@ -1,13 +1,22 @@
 # flags-2-env contract for the `next-loggers` CLI.
 # Format: https://github.com/oresoftware/flags-2-env
+# Detailed CLI/package docs:
+# https://github.com/ORESoftware/next-loggers.ts/blob/main/docs/CLI.md
 #
-# This file is the portable, authoritative description of the flag/env surface.
-# The CLI does NOT parse it at runtime: flags-2-env's Node client is an N-API
-# addon requiring a C toolchain, and this package ships zero runtime
+# This file is the portable, authoritative description of the flag/env and
+# command-help surface. `next-loggers packages` exposes the independently
+# publishable Zed, npm, PyPI, Go module, crates.io, Maven Central, pub.dev,
+# RubyGems, and Hex identities; its target/registry/version filters below are
+# therefore also part of the release documentation contract.
+#
+# The CLI does NOT parse this file at runtime: flags-2-env's Node client is an
+# N-API addon requiring a C toolchain, and this package ships zero runtime
 # dependencies. Instead src/cli/spec.ts declares the same contract in
-# TypeScript, and tests/cli-flags.test.mjs asserts the two never drift — in
-# both directions, so neither a forgotten flag nor a stale one survives.
-# `next-loggers flags --check` runs the identical comparison.
+# TypeScript, and tests/cli-flags.test.mjs asserts flags, env names, defaults,
+# descriptions, command names, and command descriptions never drift in either
+# direction. `next-loggers flags --check` runs the identical comparison.
+# Canonical flags-2-env itself audits this file in the packaging workflow at an
+# immutable tooling commit.
 #
 # This mirrors zed-cli, which keeps clap as its real parser and this file as
 # the portable description, with a test preventing drift.
@@ -23,17 +32,17 @@
 #    consumed by envToLoggerOptions() declares a default at all; the drift test
 #    enforces that mechanically.
 #
-# 2. `array` flags are repeatable. flags-2-env has no repeatable concept, so
-#    `--condition node --condition import` accumulating into a JSON array is a
-#    strict superset: the env var still holds a single JSON array, exactly as
-#    the declared type says.
+# 2. `array` flags are repeatable. flags-2-env normally accepts a JSON array;
+#    this CLI additionally accepts `--target ruby --target java` and combines
+#    repeated scalar values into one JSON-array environment value.
 
 [parse]
 command_env = "NEXT_LOGGER_CLI_COMMAND"
 allow_unknown = false
 
 [help]
-url = "https://github.com/ORESoftware/next-loggers.ts"
+url = "https://github.com/ORESoftware/next-loggers.ts/blob/main/docs/CLI.md"
+columns = ["options", "env", "type", "default", "description"]
 
 # ── Library contract ────────────────────────────────────────────────────────
 # These write the variables envToLoggerOptions() reads (src/config.ts), so a
@@ -156,6 +165,11 @@ default = "false"
 help = "Suppress non-essential output."
 
 # ── Commands ────────────────────────────────────────────────────────────────
+# Command descriptions are required and drift-checked because canonical
+# flags-2-env renders them into --help and shell-completion documentation.
+
+[commands.smoke]
+help = "Verify an installed build: import it, assert the runtime, run the smoke test."
 
 [commands.smoke.flags.package]
 env = "NEXT_LOGGER_CLI_SMOKE_PACKAGE"
@@ -177,12 +191,18 @@ type = "string"
 default = "basic"
 help = "basic = import + runtime + r2gSmokeTest; full = adds context, redaction and limits checks."
 
+[commands.doctor]
+help = "Diagnose whether logging will behave correctly in this environment."
+
 [commands.doctor.flags.strict]
 env = "NEXT_LOGGER_CLI_STRICT"
 aliases = ["strict"]
 type = "bool"
 default = "false"
 help = "Treat warnings as failures (exit 1)."
+
+[commands.resolve]
+help = "Walk the package's exports map and print what each subpath resolves to."
 
 [commands.resolve.flags.condition]
 env = "NEXT_LOGGER_CLI_CONDITIONS"
@@ -204,6 +224,9 @@ aliases = ["subpath"]
 short = "s"
 type = "string"
 help = "Limit output to one subpath, e.g. \".\" or \"./context\"."
+
+[commands.pretty]
+help = "Render next-loggers/v1 NDJSON from stdin; non-JSON lines pass through."
 
 [commands.pretty.flags.min_level]
 env = "NEXT_LOGGER_CLI_MIN_LEVEL"
@@ -234,9 +257,42 @@ type = "string"
 default = "text"
 help = "text = human output; json = re-emit filtered NDJSON so it composes."
 
+[commands.packages]
+help = "List independently publishable Zed/native packages and verify release metadata."
+
+[commands.packages.flags.target]
+env = "NEXT_LOGGER_CLI_PACKAGE_TARGETS"
+aliases = ["target"]
+short = "t"
+type = "array"
+help = "Release target to show; repeatable (zed|nodejs|python|golang|rust|wasm|java|dart|ruby|gleam|erlang|elixir)."
+
+[commands.packages.flags.registry]
+env = "NEXT_LOGGER_CLI_PACKAGE_REGISTRIES"
+aliases = ["registry"]
+short = "R"
+type = "array"
+help = "Registry to show; repeatable (zed-pkg|npm|pypi|go-modules|crates-io|maven-central|pub.dev|rubygems|hex)."
+
+[commands.packages.flags.release_version]
+env = "NEXT_LOGGER_CLI_RELEASE_VERSION"
+aliases = ["release-version"]
+type = "string"
+help = "Semantic version used to render immutable release tags; defaults to package.json."
+
+[commands.packages.flags.check]
+env = "NEXT_LOGGER_CLI_PACKAGES_CHECK"
+aliases = ["check"]
+type = "bool"
+default = "false"
+help = "Verify the compiled release catalog against package.json and .zpkg.toml."
+
+[commands.flags]
+help = "Print the command/flag/env documentation, or check it against .cli-flags.toml."
+
 [commands.flags.flags.check]
 env = "NEXT_LOGGER_CLI_FLAGS_CHECK"
 aliases = ["check"]
 type = "bool"
 default = "false"
-help = "Exit 1 if .cli-flags.toml has drifted from the compiled spec."
+help = "Exit 1 if .cli-flags.toml command, flag, env, or help metadata has drifted."

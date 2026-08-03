@@ -24,6 +24,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Check out immutable flags-2-env contract tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/flags-2-env
+          ref: 682bfddaa43fcab839b045875ef5dfcfc721d343
+          path: .flags2env
+          persist-credentials: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -56,6 +64,11 @@ jobs:
           gleam-version: "1.17.0"
           rebar3-version: "3.27.0"
 
+      - name: Audit the portable flags-2-env contract
+        run: |
+          make -C .flags2env cli
+          .flags2env/build/flags2env audit .cli-flags.toml
+
       - name: Install JavaScript and Python packaging tools
         run: |
           npm ci
@@ -63,6 +76,9 @@ jobs:
 
       - name: Build and validate synchronized release metadata
         run: npm run release:check
+
+      - name: Validate CLI, flags-2-env, and release-catalog documentation
+        run: node --test tests/cli-flags.test.mjs tests/cli-packages.test.mjs
 
       - name: Install the pinned Zed CLI
         run: >-

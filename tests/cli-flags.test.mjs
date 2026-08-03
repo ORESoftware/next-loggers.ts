@@ -9,13 +9,14 @@ import { COMMANDS, GLOBAL_FLAGS, LIBRARY_CONTRACT_FLAGS } from '../dist/cli/spec
 const CONTRACT_PATH = new URL('../.cli-flags.toml', import.meta.url);
 const source = await readFile(CONTRACT_PATH, 'utf8');
 
-test('.cli-flags.toml matches the compiled spec in both directions', () => {
+test('.cli-flags.toml matches the compiled spec and help in both directions', () => {
   const report = compareSource(source);
   assert.deepEqual(report.missing, [], 'flags in the spec but not declared in .cli-flags.toml');
   assert.deepEqual(report.stale, [], 'flags declared in .cli-flags.toml but absent from the spec');
   assert.deepEqual(report.mismatched, []);
   assert.deepEqual(report.missingCommands, []);
   assert.deepEqual(report.staleCommands, []);
+  assert.deepEqual(report.mismatchedCommands, []);
   assert.deepEqual(report.policyViolations, []);
   assert.equal(report.ok, true);
 });
@@ -38,6 +39,20 @@ test('every declared env var is NEXT_LOGGER_-prefixed and unique', () => {
   }
   assert.equal(seen.size, flags.length);
   assert.equal(flags.length > 0, true);
+});
+
+test('every command and flag has drift-checked documentation text', () => {
+  const declared = collectDeclared(parseToml(source));
+  assert.deepEqual(
+    declared.commands.map((command) => command.name).sort(),
+    COMMANDS.map((command) => command.name).sort(),
+  );
+  for (const command of declared.commands) {
+    assert.ok(command.help.length > 10, `${command.name} needs useful help text`);
+  }
+  for (const flag of declared.flags) {
+    assert.ok(flag.help.length > 5, `${flag.scope}.${flag.key} needs useful help text`);
+  }
 });
 
 test('the drift check fails when the contract loses a flag', () => {
@@ -65,7 +80,7 @@ test('the drift check fails when the contract invents a flag', () => {
   );
 });
 
-test('the drift check fails on a changed env var, type, or short', () => {
+test('the drift check fails on a changed env var, type, short, or description', () => {
   const changedEnv = source.replace(
     'env = "NEXT_LOGGER_APP_NAME"',
     'env = "NEXT_LOGGER_APPNAME"',
@@ -77,13 +92,35 @@ test('the drift check fails on a changed env var, type, or short', () => {
     '[flags.quiet]\nenv = "NEXT_LOGGER_CLI_QUIET"\naliases = ["quiet"]\nshort = "q"\ntype = "string"',
   );
   assert.equal(compareSource(changedType).ok, false);
+
+  const changedHelp = source.replace(
+    'help = "Application name stamped on every record."',
+    'help = "Stale app-name documentation."',
+  );
+  const helpReport = compareSource(changedHelp);
+  assert.equal(helpReport.ok, false);
+  assert.equal(helpReport.mismatched.some((entry) => entry.includes('global.app_name')), true);
 });
 
-test('the drift check fails when a command is undeclared', () => {
-  const withoutResolve = source.replace(/\[commands\.resolve\.flags\.[\s\S]*?(?=\n\[commands\.pretty)/, '');
-  const report = compareSource(withoutResolve);
-  assert.equal(report.ok, false);
-  assert.equal(report.missingCommands.includes('resolve'), true);
+test('the drift check fails when a command is undeclared or its help changes', () => {
+  const withoutResolve = source.replace(
+    /\[commands\.resolve\][\s\S]*?(?=\n\[commands\.pretty\])/,
+    '',
+  );
+  const missingReport = compareSource(withoutResolve);
+  assert.equal(missingReport.ok, false);
+  assert.equal(missingReport.missingCommands.includes('resolve'), true);
+
+  const changedHelp = source.replace(
+    'help = "List independently publishable Zed/native packages and verify release metadata."',
+    'help = "Stale package documentation."',
+  );
+  const mismatchReport = compareSource(changedHelp);
+  assert.equal(mismatchReport.ok, false);
+  assert.equal(
+    mismatchReport.mismatchedCommands.some((entry) => entry.startsWith('packages:')),
+    true,
+  );
 });
 
 test('no library-contract flag declares a default', () => {
@@ -166,9 +203,14 @@ test('the TOML reader handles the constructs the contract does use', () => {
   assert.equal(document.commands.c.flags.b.env, 'Y');
 });
 
-test('an unknown key inside a flag table is rejected', () => {
-  const document = parseToml(
-    '[flags.a]\nenv = "NEXT_LOGGER_A"\naliases = ["a"]\ntype = "string"\nalias = "typo"\n',
+test('an unknown key inside a flag or command table is rejected', () => {
+  const flagDocument = parseToml(
+    '[flags.a]\nenv = "NEXT_LOGGER_A"\naliases = ["a"]\ntype = "string"\nhelp = "A."\nalias = "typo"\n',
   );
-  assert.throws(() => compare(document), /unknown key "alias"/);
+  assert.throws(() => compare(flagDocument), /unknown key "alias"/);
+
+  const commandDocument = parseToml(
+    '[commands.a]\nhelp = "A command."\ndescriptions = "typo"\n',
+  );
+  assert.throws(() => compare(commandDocument), /unknown key "descriptions"/);
 });

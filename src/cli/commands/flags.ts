@@ -29,7 +29,7 @@ export async function runFlags(ctx: CommandContext): Promise<CommandResult> {
       return { exitCode: report.ok ? 0 : 1 };
     }
     if (report.ok) {
-      ctx.print('next-loggers flags: .cli-flags.toml matches the compiled spec');
+      ctx.print('next-loggers flags: .cli-flags.toml matches the compiled spec and help text');
       return { exitCode: 0 };
     }
     ctx.printErr('next-loggers flags: .cli-flags.toml has drifted');
@@ -43,6 +43,7 @@ export async function runFlags(ctx: CommandContext): Promise<CommandResult> {
     section('mismatch', report.mismatched);
     section('missing command', report.missingCommands);
     section('stale command', report.staleCommands);
+    section('command mismatch', report.mismatchedCommands);
     section('policy', report.policyViolations);
     return { exitCode: 1 };
   }
@@ -56,6 +57,11 @@ export async function runFlags(ctx: CommandContext): Promise<CommandResult> {
     ctx.print(
       JSON.stringify({
         command: 'flags',
+        commands: COMMANDS.map((command) => ({
+          name: command.name,
+          summary: command.summary,
+          flags: command.flags.map((flag) => flag.key),
+        })),
         flags: rows.map(({ scope, flag }) => ({
           scope,
           key: flag.key,
@@ -64,11 +70,19 @@ export async function runFlags(ctx: CommandContext): Promise<CommandResult> {
           short: flag.short ?? null,
           type: flag.type,
           default: flag.default ?? null,
+          help: flag.help,
         })),
       }),
     );
     return { exitCode: 0 };
   }
+
+  const commandWidth = Math.max(...COMMANDS.map((command) => command.name.length));
+  ctx.print('Commands:');
+  for (const command of COMMANDS) {
+    ctx.print(`  ${command.name.padEnd(commandWidth)}  ${command.summary}`);
+  }
+  ctx.print('Flags:');
 
   const scopeWidth = Math.max(...rows.map((row) => row.scope.length));
   const optionWidth = Math.max(...rows.map((row) => row.flag.aliases[0]?.length ?? 0)) + 2;
