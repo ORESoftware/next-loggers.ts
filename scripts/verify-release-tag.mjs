@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
+import { isStrictSemVer } from './strict-semver.mjs';
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(scriptDir, '..');
 
@@ -77,8 +79,8 @@ if (!target || !(target in releases)) {
 
 const release = releases[target];
 const version = await release.version();
-if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
-  throw new Error(`${target} version ${version} is not full semantic versioning`);
+if (!isStrictSemVer(version)) {
+  throw new Error(`${target} version ${version} is not strict Semantic Versioning 2.0.0`);
 }
 
 const tag =
