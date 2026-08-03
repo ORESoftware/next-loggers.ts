@@ -61,7 +61,7 @@ jobs:
             -v "$PWD/observability/tempo.yaml:/etc/tempo.yaml:ro" \
             grafana/tempo:2.10.5 \
             -config.file=/etc/tempo.yaml \
-            -config.verify
+            -config.verify=true
 
       - name: validate Prometheus configuration and alert rules
         run: |
