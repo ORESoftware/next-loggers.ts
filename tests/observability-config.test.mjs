@@ -90,7 +90,8 @@ test('Tempo actually generates RED/service-graph metrics and Prometheus accepts 
   assert.match(tempo, /url: http:\/\/prometheus:9090\/api\/v1\/write/u);
   assert.match(tempo, /send_exemplars: true/u);
   assert.match(tempo, /processors: \[span-metrics, service-graphs\]/u);
-  assert.match(tempo, /max_cardinality_per_label: 10000/u);
+  assert.match(tempo, /max_active_series: 100000/u);
+  assert.equal(/max_cardinality_per_label:/u.test(tempo), false);
   assert.match(tempo, /enable_target_info: false/u);
   assert.match(prometheus, /otel-collector:8888/u);
   assert.match(prometheus, /otel-collector:9464/u);
@@ -120,6 +121,7 @@ test('Grafana provisions bidirectional correlation, service graphs, and a real d
 test('the dedicated CI job validates configs and executes an end-to-end telemetry smoke test', () => {
   assert.match(workflow, /opentelemetry-collector-contrib:0\.157\.0/u);
   assert.match(workflow, /validate --config=/u);
+  assert.match(workflow, /grafana\/tempo:2\.10\.5[\s\S]*-config\.verify/u);
   assert.match(workflow, /promtool/u);
   assert.match(workflow, /docker compose[\s\S]*up -d/u);
   assert.match(workflow, /node scripts\/observability-smoke\.mjs/u);
