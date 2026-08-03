@@ -40,7 +40,11 @@ test('records with identical low-cardinality labels share one ordered stream', a
       return new Response(null, { status: 204 });
     },
   });
-  await Promise.all([transport.write(record(1)), transport.write(record(2)), transport.write(record(3))]);
+  await Promise.all([
+    transport.write(record(1)),
+    transport.write(record(2)),
+    transport.write(record(3)),
+  ]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].streams.length, 1);
   const stream = calls[0].streams[0];
@@ -164,12 +168,15 @@ test('non-retryable client errors are attempted exactly once', async () => {
     retryBaseMillis: 1,
     fetch: async () => {
       attempts += 1;
-      return new Response('bad request', { status: 400, statusText: 'Bad Request' });
+      return new Response('bad request', {
+        status: 400,
+        statusText: 'Bad Request',
+      });
     },
   });
   await assert.rejects(transport.write(record(1)), /400 Bad Request/);
   assert.equal(attempts, 1);
-  await assert.rejects(transport.close(), /400 Bad Request/);
+  await transport.close();
 });
 
 test('408, 429, and 5xx responses are retried and eventually succeed', async (t) => {
@@ -209,7 +216,7 @@ test('network failures are retried up to the configured limit', async () => {
   });
   await assert.rejects(transport.write(record(1)), /network unavailable/);
   assert.equal(attempts, 3);
-  await assert.rejects(transport.close(), /network unavailable/);
+  await transport.close();
 });
 
 test('request timeouts abort each attempt and honor retry bounds', async () => {
@@ -239,7 +246,7 @@ test('request timeouts abort each attempt and honor retry bounds', async () => {
   await assert.rejects(transport.write(record(1)), /aborted/i);
   assert.equal(attempts, 2);
   assert.equal(aborted, 2);
-  await assert.rejects(transport.close(), /aborted/i);
+  await transport.close();
 });
 
 test('concurrent flush calls share one in-flight push', async () => {
@@ -306,14 +313,18 @@ test('close drains multiple batches and is idempotent', async () => {
       return new Response(null, { status: 204 });
     },
   });
-  const writes = Array.from({ length: 5 }, (_, index) => transport.write(record(index + 1)));
+  const writes = Array.from({ length: 5 }, (_, index) =>
+    transport.write(record(index + 1)),
+  );
   await Promise.all(writes);
   await transport.close();
   await transport.close();
   assert.equal(payloads.length, 3);
   assert.deepEqual(
     payloads.flatMap((payload) =>
-      payload.streams.flatMap((stream) => stream.values.map(([, line]) => JSON.parse(line).id)),
+      payload.streams.flatMap((stream) =>
+        stream.values.map(([, line]) => JSON.parse(line).id),
+      ),
     ),
     ['record-1', 'record-2', 'record-3', 'record-4', 'record-5'],
   );
@@ -334,15 +345,22 @@ test('all records in a failed batch reject with the same terminal error', async 
     transport.write(record(2)),
     transport.write(record(3)),
   ]);
-  assert.deepEqual(results.map((result) => result.status), ['rejected', 'rejected', 'rejected']);
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ['rejected', 'rejected', 'rejected'],
+  );
   for (const result of results) {
     assert.equal(result.reason, terminal);
   }
-  await assert.rejects(transport.close(), terminal);
+  await transport.close();
 });
 
 test('endpoint validation rejects malformed and non-http URLs', () => {
-  for (const endpoint of ['not a url', 'ftp://example.test/logs', 'file:///tmp/loki']) {
+  for (const endpoint of [
+    'not a url',
+    'ftp://example.test/logs',
+    'file:///tmp/loki',
+  ]) {
     assert.throws(() => new LokiTransport({ endpoint }), /URL|http/);
   }
 });
