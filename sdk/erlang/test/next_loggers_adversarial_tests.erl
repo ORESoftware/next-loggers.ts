@@ -142,7 +142,7 @@ transport_failure_is_returned_without_corrupting_record_test() ->
     ),
     receive
         {attempted_record, Record} ->
-            ?assertEqual(?MODULE_STRING, ?MODULE_STRING),
+            ?assertEqual(<<"next-loggers/v1">>, maps:get(schema, Record)),
             ?assertEqual(<<"failed">>, maps:get(message, Record)),
             ?assertEqual(<<"ERROR">>, maps:get(level, Record))
     after 1000 -> ?assert(false)
@@ -191,10 +191,10 @@ callback_error_identity_and_span_cleanup_test() ->
 
 start_failure_and_invalid_result_use_noop_span_test() ->
     Logger = logger(debug),
-    Failing = stable_tracer(self())#{
+    Failing = (stable_tracer(self()))#{
         start := fun(_Name, _Attributes) -> erlang:error(sdk_unavailable) end
     },
-    Invalid = stable_tracer(self())#{
+    Invalid = (stable_tracer(self()))#{
         start := fun(_Name, _Attributes) -> invalid_result end
     },
     ?assertEqual(
