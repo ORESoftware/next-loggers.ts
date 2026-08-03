@@ -7,6 +7,13 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = new Set(['.ts', '.js', '.mjs', '.rs', '.go', '.java', '.erl', '.ex', '.exs', '.dart', '.gleam']);
 const ignored = new Set(['node_modules', 'dist', 'build', 'target', '.git']);
+const telemetrySourceNames = new Set([
+  'browser-stream.ts',
+  'otel.ts',
+  'prometheus.ts',
+  'supabase.ts',
+  'supabase-ingest.ts',
+]);
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -28,7 +35,9 @@ const assignment = '=(?!=|>)';
 
 test('telemetry integrations contain no automatic instrumentation or runtime monkey patching', async () => {
   const files = [
-    path.join(root, 'src', 'otel.ts'),
+    ...(await sourceFiles(path.join(root, 'src'))).filter((filename) =>
+      telemetrySourceNames.has(path.basename(filename)),
+    ),
     ...(await sourceFiles(path.join(root, 'sdk'))),
   ];
   const forbidden = [
