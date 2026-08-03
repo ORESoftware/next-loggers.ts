@@ -34,10 +34,13 @@ jobs:
 
   # ── Native SDKs sharing the next-loggers/v1 wire contract ────────────────
   polyglot:
-    name: python, go, rust & gleam
+    name: python, go, rust, gleam, java, dart, beam & wasm
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -47,12 +50,21 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: wasm32-unknown-unknown
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "28"
+          elixir-version: "1.19.0"
           gleam-version: "1.17.0"
       - run: cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
       - run: gleam format --check src test
