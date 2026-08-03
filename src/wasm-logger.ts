@@ -137,7 +137,10 @@ export function createWasmLoggerHost(
     throw new TypeError('createWasmLoggerHost requires WebAssembly memory');
   }
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  const maximumPayloadBytes = Math.max(1, options.maximumPayloadBytes ?? 256 * 1_024);
+  const configuredMaximum = options.maximumPayloadBytes ?? 256 * 1_024;
+  const maximumPayloadBytes = Number.isFinite(configuredMaximum)
+    ? Math.max(1, Math.floor(configuredMaximum))
+    : 256 * 1_024;
   const pending = new Set<Promise<void>>();
 
   const memory = (): WebAssembly.Memory => {
@@ -166,17 +169,29 @@ export function createWasmLoggerHost(
     pending.add(promise);
     const cleanup = (): void => void pending.delete(promise);
     void promise.then(cleanup, cleanup);
-    options.waitUntil?.(promise);
+    try {
+      options.waitUntil?.(promise);
+    } catch {
+      // A host lifecycle callback must never throw through the synchronous ABI.
+    }
   };
 
   const reportDecodeError = (error: unknown): number => {
     const normalized = error instanceof Error ? error : new Error(String(error));
-    options.onDecodeError?.(normalized);
-    const task = logger
-      .error('Rejected WebAssembly log payload', normalized)
-      .addTags('wasm', 'decode-error')
-      .send();
-    track(task);
+    try {
+      options.onDecodeError?.(normalized);
+    } catch {
+      // Diagnostics are advisory and cannot alter the ABI return contract.
+    }
+    try {
+      const task = logger
+        .error('Rejected WebAssembly log payload', normalized)
+        .addTags('wasm', 'decode-error')
+        .send();
+      track(task);
+    } catch {
+      // A closed or broken logger still yields the deterministic -1 ABI result.
+    }
     return -1;
   };
 
