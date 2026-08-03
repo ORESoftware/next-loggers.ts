@@ -52,9 +52,9 @@ jobs:
         run: |
           npm run build --prefix .tooling/r2g
           mkdir -p "$RUNNER_TEMP/r2g-package"
-          npm pack \
-            --prefix .tooling/r2g \
-            --pack-destination "$RUNNER_TEMP/r2g-package"
+          cd .tooling/r2g
+          npm pack --pack-destination "$RUNNER_TEMP/r2g-package"
+          test -n "$(find "$RUNNER_TEMP/r2g-package" -maxdepth 1 -name 'r2g-*.tgz' -print -quit)"
 
       - name: Install r2g from its packed artifact
         run: |
