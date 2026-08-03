@@ -1,7 +1,7 @@
 {
   "name": "@oresoftware/next-loggers",
   "version": "0.1.0",
-  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, and edge workers",
+  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, edge workers, and polyglot services",
   "type": "module",
   "types": "./dist/base-logger.d.ts",
   "sideEffects": false,
@@ -11,6 +11,9 @@
   "files": [
     "dist",
     "src",
+    "sdk",
+    "contracts",
+    "docs",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -89,6 +92,26 @@
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
+    "./otel": {
+      "types": "./dist/otel.d.ts",
+      "default": "./dist/otel.js"
+    },
+    "./prometheus": {
+      "types": "./dist/prometheus.d.ts",
+      "default": "./dist/prometheus.js"
+    },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
+    },
     "./browser-stream": {
       "types": "./dist/browser-stream.d.ts",
       "default": "./dist/browser-stream.js"
@@ -144,6 +167,19 @@
     "nextjs",
     "esm",
     "supabase",
+    "opentelemetry",
+    "otel",
+    "loki",
+    "prometheus",
+    "grafana",
+    "wasm",
+    "rust",
+    "go",
+    "gleam",
+    "erlang",
+    "elixir",
+    "java",
+    "dart",
     "bun",
     "deno",
     "edge",
