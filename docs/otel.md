@@ -3,7 +3,7 @@
 `@oresoftware/next-loggers/otel` adapts the stable `next-loggers/v1` record to
 application-owned OpenTelemetry log, trace, and metric objects. Application code
 continues to call `logger.info(...)`, `logger.error(...)`, and related methods;
-OpenTelemetry is downstream of those calls as a normal logger transport.
+OpenTelemetry stays downstream of those calls as a normal logger transport.
 
 ## Non-negotiable runtime boundary
 
@@ -11,19 +11,19 @@ This package does **not**:
 
 - register a global tracer, meter, logger, propagator, or context manager;
 - install OpenTelemetry automatic instrumentation;
-- patch Node.js modules, prototypes, fetch, HTTP clients, database drivers, or
-  framework internals;
+- patch Node.js modules, prototypes, `fetch`, HTTP clients, database drivers,
+  console methods, or framework internals;
 - use `require-in-the-middle`, `shimmer`, or equivalent hooks;
 - import `node:async_hooks` from the browser-safe OTEL adapter.
 
 The application owns SDK startup and passes structural adapters explicitly.
-That keeps Node.js, Bun, Deno, workerd, browser, WASM, Flutter, BEAM, Java, Go,
-and Rust runtimes consistent and testable.
+That keeps Node.js, Bun, Deno, workerd, browsers, WASM, Flutter, BEAM, Java, Go,
+Rust, Python, and Gleam runtimes consistent and testable.
 
 ## TypeScript example
 
 ```ts
-import { logs, metrics, trace, context } from '@opentelemetry/api';
+import { context, logs, metrics, trace } from '@opentelemetry/api';
 import { createNodeLogger } from '@oresoftware/next-loggers/node';
 import {
   createOpenTelemetryContextProvider,
@@ -44,38 +44,88 @@ const logger = createNodeLogger({
     logger: otelLogger,
     activeSpan,
     activeContext: () => context.active(),
+    metricAttributes: {
+      'deployment.environment.name': 'production',
+    },
     recordMetric(name, value, attributes) {
       (name === 'next_loggers.errors' ? errors : records).add(value, attributes);
+    },
+    onBridgeError(error, operation) {
+      // Route this to an application-owned diagnostic sink. Do not feed it back
+      // through the same failing OTEL transport.
+      process.stderr.write(`[otel bridge:${operation}] ${String(error)}\n`);
     },
   }),
 });
 ```
 
 The OpenTelemetry packages shown above belong to the application, not this
-library. This package intentionally has no dependency on an OTEL SDK.
+library. `next-loggers` intentionally has no dependency on an OTEL SDK.
 
-## Context model
+## Context and sampling semantics
 
-- Node.js, Bun, and Deno may use the package's explicit `AsyncLocalStorage`
+- Node.js, Bun, and Deno can use the package's explicit `AsyncLocalStorage`
   context API from `@oresoftware/next-loggers/context`.
-- Rust, Go, Java, Dart, Erlang, Elixir, Gleam, and WASM SDKs use their native
+- Rust, Go, Java, Dart, Erlang, Elixir, Gleam, Python, and WASM SDKs use native
   task/thread/process context facilities or explicit context values.
-- Browser and workerd builds use explicit request/task context; browser log
-  delivery continues through the Supabase transport where configured.
-- `createOpenTelemetryContextProvider` reads only the active span callback the
-  application supplies and maps its W3C identifiers into `traceId` plus
-  `otel.span_id`, `otel.trace_flags`, and `otel.trace_state` fields.
+- Browser and workerd builds use explicit request/task context; durable client
+  delivery should use an authenticated Supabase ingestion endpoint.
+- `createOpenTelemetryContextProvider` reads only the active-span callback the
+  application supplies and maps a valid W3C tuple into `traceId`,
+  `otel.span_id`, `otel.trace_flags`, `otel.trace_state`, and `otel.remote`.
+- A valid **non-recording** span still contributes correlation by default.
+  Sampling controls span export; it must not make correlated logs disappear.
+  Pass `{ requireRecordingSpan: true }` only when that stricter behavior is
+  intentionally required.
+- Span events, exception recording, and status updates are performed only for a
+  recording span.
+
+The bridge rejects malformed and all-zero W3C trace/span IDs. Attribute count,
+string length, primitive-array length, attribute-name length, and trace-state
+length are bounded before data reaches an exporter.
+
+## Metric-cardinality boundary
+
+The log payload may contain record IDs, trace IDs, request IDs, users, routes,
+and arbitrary fields. Those values are useful in logs but unsafe as metric
+labels. `recordMetric` therefore receives only bounded dimensions:
+
+- `service.name`;
+- `next_logger.runtime`;
+- `next_logger.level`;
+- explicit static `metricAttributes` supplied by the application.
+
+Known high-cardinality keys such as `trace.id`, `span.id`, `log.record.uid`, and
+`next_logger.field.*` are discarded from `metricAttributes`. Applications must
+still keep their remaining custom metric attributes low-cardinality.
+
+## Failure ownership
+
+`logger.emit()` is the primary OTEL log-delivery operation. If it fails, the
+transport reports the failure to `next-loggers` in the normal transport path.
+Optional bridge effects cannot replace that result:
+
+- active-span/context lookup failures are isolated;
+- trace-state serialization failures are isolated;
+- span-event, exception, and status failures are isolated independently;
+- metric-hook failures are isolated;
+- diagnostic callback failures are swallowed to prevent recursive telemetry
+  failure.
+
+The application owns OTEL provider startup, flushing, and shutdown. A logger
+transport must never shut down a shared provider unless an application-specific
+wrapper explicitly grants that ownership.
 
 ## Cluster flow
 
 The supported production flow is:
 
 1. application logger call;
-2. explicit OTEL adapter and/or Supabase client transport;
-3. OTLP gRPC/HTTP to the cluster collector;
+2. explicit OTEL adapter and/or authenticated Supabase client transport;
+3. OTLP gRPC/HTTP to an OpenTelemetry Collector;
 4. traces to Tempo, logs to Loki, metrics and span metrics to Prometheus;
-5. correlation and dashboards in Grafana.
+5. correlation, alerts, and dashboards in Grafana.
 
-All exporters must be bounded with queues, retry limits, memory limits, and
-network policies. Telemetry failure must not crash the application or silently
-change business behavior.
+Exporters should use bounded queues, retry limits, memory limits, and network
+policies. Telemetry failure must not crash the application or silently change
+business behavior.
