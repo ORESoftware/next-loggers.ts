@@ -163,7 +163,7 @@ test('ERROR fanout increments both error metrics and marks the active span', asy
   );
   assert.equal(state.events.length, 1);
   assert.equal(state.exceptions.length, 1);
-  assert.deepEqual(state.statuses, [[{ code: 2, message: 'invoice failed Error: invoice declined' }]]);
+  assert.deepEqual(state.statuses, [[{ code: 2, message: 'invoice failed invoice declined' }]]);
 
   const output = prometheus.registry.render();
   assert.match(output, /next_loggers_error_records_total.* 1/);
