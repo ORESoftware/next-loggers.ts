@@ -30,6 +30,14 @@ interface LokiStream {
 }
 
 const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const RESERVED_LABELS = new Set(['service_name', 'runtime', 'level']);
+
+class NonRetryableLokiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableLokiError';
+  }
+}
 
 function validateHttpUrl(value: string): string {
   let parsed: URL;
@@ -51,6 +59,9 @@ function normalizeStaticLabels(
   for (const [name, value] of Object.entries(labels ?? {})) {
     if (!LABEL_NAME.test(name)) {
       throw new TypeError(`Invalid Loki label name: ${name}`);
+    }
+    if (RESERVED_LABELS.has(name)) {
+      throw new TypeError(`Static label ${name} is a reserved Loki label`);
     }
     if (!value) {
       continue;
@@ -147,6 +158,14 @@ export class LokiTransport implements LogTransport {
     (this.timer as unknown as { unref?: () => void }).unref?.();
   }
 
+  private notifyDrop(record: LogRecord, reason: Error): void {
+    try {
+      this.options.onDrop?.(record, reason);
+    } catch {
+      // Backpressure diagnostics cannot make queue behavior nondeterministic.
+    }
+  }
+
   write(record: LogRecord): Promise<void> {
     if (this.closed) {
       return Promise.reject(new Error('Loki transport is closed'));
@@ -157,7 +176,7 @@ export class LokiTransport implements LogTransport {
         if (evicted) {
           const error = new Error('Loki transport queue capacity exceeded');
           evicted.reject(error);
-          this.options.onDrop?.(evicted.record, error);
+          this.notifyDrop(evicted.record, error);
         }
       }
       this.queue.push({ record, resolve, reject });
@@ -188,9 +207,9 @@ export class LokiTransport implements LogTransport {
         const response = await fetchImplementation(this.endpoint, {
           method: 'POST',
           headers: {
+            ...this.options.headers,
             'content-type': 'application/json',
             ...(this.options.tenantId ? { 'X-Scope-OrgID': this.options.tenantId } : {}),
-            ...this.options.headers,
           },
           body,
           signal: controller.signal,
@@ -200,17 +219,16 @@ export class LokiTransport implements LogTransport {
         if (!response.ok) {
           const retryable =
             response.status === 408 || response.status === 429 || response.status >= 500;
-          const error = new Error(`Loki returned ${response.status} ${response.statusText}`);
-          if (!retryable || attempt >= maximumRetries) {
-            throw error;
+          const message = `Loki returned ${response.status} ${response.statusText}`;
+          if (!retryable) {
+            throw new NonRetryableLokiError(message);
           }
-          lastError = error;
-        } else {
-          return;
+          throw new Error(message);
         }
+        return;
       } catch (error) {
         lastError = error;
-        if (attempt >= maximumRetries) {
+        if (error instanceof NonRetryableLokiError || attempt >= maximumRetries) {
           break;
         }
       } finally {
