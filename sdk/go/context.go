@@ -114,6 +114,13 @@ const (
 	OtelStatusError = 2
 )
 
+type noopSpan struct{}
+
+func (noopSpan) LogContext() TraceContext          { return TraceContext{} }
+func (noopSpan) RecordError(error)                 {}
+func (noopSpan) SetStatus(int, string)             {}
+func (noopSpan) End()                              {}
+
 func sendSpanLogSafely(event *Event) {
 	if event == nil {
 		return
@@ -158,34 +165,55 @@ func readSpanContextSafely(
 	return span.LogContext()
 }
 
+func reportStartFailure(ctx context.Context, logger *Logger, name string, failure any) {
+	sendSpanLogSafely(
+		logger.ErrorContext(ctx, "OpenTelemetry start span failed:", name, failure).
+			AddFields(map[string]any{
+				"otel.bridge_operation": "start span",
+				"otel.span_name":       name,
+				"otel.span_phase":      "start-error",
+			}).
+			AddTags("otel-span", "otel-bridge-error"),
+	)
+}
+
 func startSpanSafely(
 	ctx context.Context,
 	logger *Logger,
 	tracer Tracer,
 	name string,
 	attributes map[string]any,
-) (spanCtx context.Context, span Span, err error) {
+) (spanCtx context.Context, span Span) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	spanCtx = ctx
+	span = noopSpan{}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("nextloggers: OpenTelemetry start span failed: %v", recovered)
-			sendSpanLogSafely(
-				logger.ErrorContext(ctx, "OpenTelemetry start span failed:", name, err).
-					AddFields(map[string]any{
-						"otel.span_name":  name,
-						"otel.span_phase": "start-error",
-					}).
-					AddTags("otel-span", "otel-bridge-error"),
-			)
+			reportStartFailure(ctx, logger, name, recovered)
+			spanCtx = ctx
+			span = noopSpan{}
 		}
 	}()
-	spanCtx, span = tracer.Start(ctx, name, cloneMap(attributes))
-	return spanCtx, span, nil
+	startedCtx, startedSpan := tracer.Start(ctx, name, cloneMap(attributes))
+	if startedCtx != nil {
+		spanCtx = startedCtx
+	}
+	if startedSpan == nil {
+		reportStartFailure(ctx, logger, name, "tracer returned a nil span")
+		span = noopSpan{}
+		return spanCtx, span
+	}
+	span = startedSpan
+	return spanCtx, span
 }
 
 // WithSpan starts and ends one explicit span and mirrors its lifecycle through
 // next-loggers. Logging and OTel lifecycle failures never replace the
 // application result. A panic from the application callback is recorded and
-// then re-raised unchanged.
+// then re-raised unchanged. A tracer startup failure runs the callback with a
+// no-op span after emitting a next-loggers bridge-error record.
 func WithSpan[T any](
 	ctx context.Context,
 	logger *Logger,
@@ -203,13 +231,10 @@ func WithSpan[T any](
 	if callback == nil {
 		return result, fmt.Errorf("nextloggers: callback is nil")
 	}
-	spanCtx, span, startErr := startSpanSafely(ctx, logger, tracer, name, attributes)
-	if startErr != nil {
-		return result, startErr
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if span == nil {
-		return result, fmt.Errorf("nextloggers: tracer returned a nil span")
-	}
+	spanCtx, span := startSpanSafely(ctx, logger, tracer, name, attributes)
 	spanCtx = WithLogContext(spanCtx, readSpanContextSafely(spanCtx, logger, span))
 	started := time.Now()
 	sendSpanLogSafely(
