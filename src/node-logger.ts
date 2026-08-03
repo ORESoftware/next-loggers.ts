@@ -12,6 +12,11 @@ import {
 // works in type position and `base.createLogger` in value position.
 export * as base from './base-logger.js';
 
+// r2g phase-S loads the package root and requires this exact flat export.
+// Keep the rest of the shared API namespaced; this one compatibility hook is
+// deliberately promoted so the packed artifact can be certified directly.
+export { r2gSmokeTest } from './base-logger.js';
+
 type ProcessListener = (...values: never[]) => void;
 
 declare const process: {
