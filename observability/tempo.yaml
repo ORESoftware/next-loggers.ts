@@ -68,4 +68,3 @@ overrides:
     metrics_generator:
       processors: [span-metrics, service-graphs]
       max_active_series: 100000
-      max_cardinality_per_label: 10000
