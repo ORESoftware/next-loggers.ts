@@ -23,6 +23,9 @@ async function sourceFiles(directory) {
   return results;
 }
 
+// Match a direct assignment without treating equality checks (`===`) as writes.
+const assignment = '=(?!=|>)';
+
 test('telemetry integrations contain no automatic instrumentation or runtime monkey patching', async () => {
   const roots = ['src', 'sdk'].map((directory) => path.join(root, directory));
   const files = (await Promise.all(roots.map(sourceFiles))).flat();
@@ -33,10 +36,10 @@ test('telemetry integrations contain no automatic instrumentation or runtime mon
     ['global logger provider registration', /setGlobalLoggerProvider\s*\(/u],
     ['require-in-the-middle hook', /require-in-the-middle/u],
     ['shimmer hook', /(?:from|require\s*\()\s*['"]shimmer['"]/u],
-    ['Node module loader interception', /Module\s*\.\s*_load\s*=/u],
-    ['prototype replacement', /\.\s*prototype\s*\.[\w$]+\s*=/u],
-    ['console replacement', /console\s*\.\s*(?:log|debug|info|warn|error)\s*=/u],
-    ['global fetch replacement', /globalThis\s*\.\s*fetch\s*=/u],
+    ['Node module loader interception', new RegExp(`Module\\s*\\.\\s*_load\\s*${assignment}`, 'u')],
+    ['prototype replacement', new RegExp(`\\.\\s*prototype\\s*\\.[\\w$]+\\s*${assignment}`, 'u')],
+    ['console replacement', new RegExp(`console\\s*\\.\\s*(?:log|debug|info|warn|error)\\s*${assignment}`, 'u')],
+    ['global fetch replacement', new RegExp(`globalThis\\s*\\.\\s*fetch\\s*${assignment}`, 'u')],
   ];
 
   for (const filename of files) {
