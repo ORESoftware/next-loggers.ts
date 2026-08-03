@@ -105,8 +105,6 @@ fn transport_errors_are_visible_to_the_host() {
         }
     }
 
-    let logger = Logger::new("app")
-        .unwrap()
-        .with_transport(Arc::new(Broken));
+    let logger = Logger::new("app").unwrap().with_transport(Arc::new(Broken));
     assert_eq!(logger.error("boom", None).unwrap_err(), "offline");
 }
