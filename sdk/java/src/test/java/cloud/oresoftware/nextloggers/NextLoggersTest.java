@@ -4,8 +4,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public final class NextLoggersTest {
   private NextLoggersTest() {}
@@ -49,7 +51,8 @@ public final class NextLoggersTest {
     assert NextLoggers.toJson(record).contains("\"schema\":\"next-loggers/v1\"");
     assert NextLoggers.currentContext() == null : "context was not restored";
 
-    try (var pool = Executors.newFixedThreadPool(2)) {
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
       List<Callable<String>> calls =
           List.of(
               () ->
@@ -63,6 +66,11 @@ public final class NextLoggersTest {
       List<Future<String>> futures = pool.invokeAll(calls);
       assert "trace-a".equals(futures.get(0).get());
       assert "trace-b".equals(futures.get(1).get());
+    } finally {
+      pool.shutdownNow();
+      if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+        throw new AssertionError("executor did not terminate");
+      }
     }
 
     System.out.println("Java next-loggers conformance passed");
