@@ -165,7 +165,11 @@ export class BrowserStreamTransport implements LogTransport {
       return;
     }
     this.queue.push(record);
-    this.droppedRecords += this.queue.trimToLast(this.options.maxQueueSize ?? 2_000);
+    const maximumQueueSize = Math.max(
+      0,
+      Math.floor(this.options.maxQueueSize ?? 2_000),
+    );
+    this.droppedRecords += this.queue.trimToLast(maximumQueueSize);
     this.schedule(this.urgentLevels.has(record.level));
   }
 
@@ -276,7 +280,10 @@ export class BrowserStreamTransport implements LogTransport {
     }
     this.flushInFlight = true;
     try {
-      const batchSize = Math.max(1, this.options.batchSize ?? 120);
+      const batchSize = Math.max(
+        1,
+        Math.floor(this.options.batchSize ?? 120),
+      );
       while (this.queue.length > 0) {
         const batch = this.queue.peek(batchSize);
         if (batch.length === 0) {
