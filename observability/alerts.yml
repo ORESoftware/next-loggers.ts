@@ -1,0 +1,48 @@
+groups:
+  - name: next-loggers-observability
+    interval: 30s
+    rules:
+      - alert: ObservabilityTargetDown
+        expr: up{job=~"prometheus|otel-collector-internal|otel-collector-exported-metrics|loki|tempo"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Observability target {{ $labels.job }} is down"
+          description: "Prometheus has been unable to scrape {{ $labels.instance }} for two minutes."
+
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prometheus configuration reload failed
+          description: Prometheus is running with its last valid configuration.
+
+      - alert: NextLoggersTransportFailureRate
+        expr: sum by (transport) (rate(next_loggers_transport_writes_total{outcome="failure"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Logger transport {{ $labels.transport }} is failing"
+          description: The transport has continuously reported failed writes for five minutes.
+
+      - alert: NextLoggersDropsDetected
+        expr: sum by (transport, reason) (increase(next_loggers_transport_dropped_total[10m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Logger transport {{ $labels.transport }} dropped records"
+          description: "Records were dropped for reason {{ $labels.reason }} during the last ten minutes."
+
+      - alert: NextLoggersPendingWritesHigh
+        expr: max(next_loggers_pending_writes) > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Logger pending-write backlog is high
+          description: More than 1,000 writes have remained pending for ten minutes.
