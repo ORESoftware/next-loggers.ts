@@ -317,6 +317,10 @@ export class BrowserStreamTransport implements LogTransport {
    * reliable to do, and the records are dropped rather than silently retried.
    */
   flushOnExit(records: readonly LogRecord[]): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
     const pending = [...this.queue.toArray(), ...records];
     if (pending.length === 0) {
       return;
