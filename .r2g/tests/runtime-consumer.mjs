@@ -3,8 +3,9 @@
 // phase-C container runtime (node, bun, deno) against the installed package.
 import assert from 'node:assert/strict';
 
-// The shared surface arrives as the `base` namespace re-export, not as flat names.
-import rootLogger, { base } from '@oresoftware/next-loggers';
+// r2g phase-S requires the package root to expose r2gSmokeTest directly. The
+// shared surface remains available through `base` for every runtime.
+import rootLogger, { base, r2gSmokeTest } from '@oresoftware/next-loggers';
 import { createLogger } from '@oresoftware/next-loggers/base';
 import {
   installLogContextProvider,
@@ -61,7 +62,9 @@ const tracked = createLogger({ console: false }).setErrorTrackingUrl(
 await tracked.error('tracked in container').send();
 assert.deepEqual(attempts, ['https://primary.invalid/collect', 'https://fallback.invalid/exec']);
 
-assert.equal(await base.r2gSmokeTest(), true);
+assert.equal(r2gSmokeTest, base.r2gSmokeTest);
+assert.equal(await r2gSmokeTest(), true);
 await logger.close();
+await tracked.close();
 await rootLogger.close();
 console.log(`${label} passed`);
