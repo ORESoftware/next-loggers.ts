@@ -1,0 +1,8 @@
+name: oresoftware_next_loggers
+description: Dart next-loggers/v1 implementation with Zone context, Supabase transport, and explicit OTEL adapters.
+version: 0.1.0
+repository: https://github.com/ORESoftware/next-loggers.ts
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+dev_dependencies:
+  test: ^1.25.0
