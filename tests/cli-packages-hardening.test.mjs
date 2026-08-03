@@ -6,13 +6,21 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import {
+  STRICT_SEMVER_PATTERN,
+  isStrictSemVer as isStrictReleaseSemVer,
+} from '../scripts/strict-semver.mjs';
 import { runPackages } from '../dist/cli/commands/packages.js';
 import { CommandContext } from '../dist/cli/context.js';
-import { isStrictSemVer } from '../dist/cli/semver.js';
+import { PACKAGE_RELEASES, releaseTag } from '../dist/cli/package-catalog.js';
+import { SEMVER_PATTERN, isStrictSemVer } from '../dist/cli/semver.js';
 import { findCommand } from '../dist/cli/spec.js';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const cli = fileURLToPath(new URL('../dist/cli/main.js', import.meta.url));
+const tagVerifier = fileURLToPath(
+  new URL('../scripts/verify-release-tag.mjs', import.meta.url),
+);
 const packageManifest = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8'),
 );
@@ -23,6 +31,14 @@ function run(args, env = {}) {
     cwd: repositoryRoot,
     encoding: 'utf8',
     env: { ...process.env, ...env },
+  });
+}
+
+function runTagVerifier(target, tag) {
+  return spawnSync(process.execPath, [tagVerifier, target, tag], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    env: { ...process.env, GITHUB_REF_NAME: '' },
   });
 }
 
@@ -65,7 +81,9 @@ async function runFixtureCheck(t, transform, { writeManifest = true } = {}) {
   };
 }
 
-test('release versions use strict Semantic Versioning 2.0.0 syntax', () => {
+test('CLI and release workflows use the identical strict SemVer language', () => {
+  assert.equal(SEMVER_PATTERN.source, STRICT_SEMVER_PATTERN.source);
+
   const valid = [
     '0.0.0',
     '1.2.3',
@@ -90,9 +108,11 @@ test('release versions use strict Semantic Versioning 2.0.0 syntax', () => {
   ];
   for (const value of valid) {
     assert.equal(isStrictSemVer(value), true, value);
+    assert.equal(isStrictReleaseSemVer(value), true, `release workflow: ${value}`);
   }
   for (const value of invalid) {
     assert.equal(isStrictSemVer(value), false, value);
+    assert.equal(isStrictReleaseSemVer(value), false, `release workflow: ${value}`);
     const result = run(['packages', '--release-version', value]);
     assert.equal(result.status, 2, `${value}: ${result.stderr}`);
     assert.match(result.stderr, /must be full semantic versioning/);
@@ -110,6 +130,19 @@ test('release versions use strict Semantic Versioning 2.0.0 syntax', () => {
   const output = JSON.parse(result.stdout);
   assert.equal(output.version, '1.2.3-alpha.1+build.5');
   assert.equal(output.packages[0].tag, 'v1.2.3-alpha.1+build.5');
+});
+
+test('every release route verifies its exact immutable tag and rejects a moved version', () => {
+  for (const release of PACKAGE_RELEASES) {
+    const exactTag = releaseTag(release, packageManifest.version);
+    const exact = runTagVerifier(release.target, exactTag);
+    assert.equal(exact.status, 0, `${release.target}: ${exact.stderr}`);
+    assert.match(exact.stdout, new RegExp(`^${release.target}: verified `));
+
+    const moved = runTagVerifier(release.target, releaseTag(release, '9.9.9'));
+    assert.notEqual(moved.status, 0, `${release.target} accepted a mismatched tag`);
+    assert.match(moved.stderr, /release tag mismatch/);
+  }
 });
 
 test('target and registry filters normalize case, whitespace, and duplicates', () => {
