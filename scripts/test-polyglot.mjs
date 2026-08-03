@@ -32,6 +32,36 @@ const suites = [
     args: ['test'],
     cwd: path.join(root, 'sdk', 'gleam'),
   },
+  {
+    name: 'Java',
+    command: 'bash',
+    args: ['test.sh'],
+    cwd: path.join(root, 'sdk', 'java'),
+  },
+  {
+    name: 'Dart/Flutter',
+    command: 'dart',
+    args: ['run', 'test/conformance.dart'],
+    cwd: path.join(root, 'sdk', 'dart'),
+  },
+  {
+    name: 'Erlang',
+    command: 'bash',
+    args: ['test.sh'],
+    cwd: path.join(root, 'sdk', 'erlang'),
+  },
+  {
+    name: 'Elixir',
+    command: 'bash',
+    args: ['test.sh'],
+    cwd: path.join(root, 'sdk', 'elixir'),
+  },
+  {
+    name: 'WASM',
+    command: 'bash',
+    args: ['test.sh'],
+    cwd: path.join(root, 'sdk', 'wasm'),
+  },
 ];
 
 for (const suite of suites) {
