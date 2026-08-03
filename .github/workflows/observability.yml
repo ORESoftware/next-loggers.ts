@@ -55,6 +55,14 @@ jobs:
             otel/opentelemetry-collector-contrib:0.157.0 \
             validate --config=/etc/otelcol-contrib/config.yaml
 
+      - name: validate Tempo configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/observability/tempo.yaml:/etc/tempo.yaml:ro" \
+            grafana/tempo:2.10.5 \
+            -config.file=/etc/tempo.yaml \
+            -config.verify
+
       - name: validate Prometheus configuration and alert rules
         run: |
           docker run --rm \
