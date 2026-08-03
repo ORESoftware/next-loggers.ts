@@ -9,10 +9,9 @@ import {
   type PackageRelease,
   type ReleaseTargetName,
 } from '../package-catalog.js';
+import { isStrictSemVer } from '../semver.js';
 import { asTable, parseToml, type TomlValue } from '../toml.js';
 import type { CommandContext, CommandResult } from '../context.js';
-
-const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 interface CatalogCheck {
   ok: boolean;
@@ -46,8 +45,11 @@ function staticCatalogErrors(): string[] {
     }
     tags.add(release.tagFormat);
 
-    if (!release.tagFormat.includes('{version}')) {
-      errors.push(`${release.target} tag format has no {version} placeholder`);
+    const placeholders = release.tagFormat.match(/\{version\}/g)?.length ?? 0;
+    if (placeholders !== 1) {
+      errors.push(
+        `${release.target} tag format must contain exactly one {version} placeholder`,
+      );
     }
     if (release.target !== 'zed' && release.zedTarget === undefined) {
       errors.push(`${release.target} has no matching Zed target`);
@@ -222,7 +224,7 @@ export async function runPackages(ctx: CommandContext): Promise<CommandResult> {
   }
 
   const releaseVersion = ctx.flag('release_version') ?? packageVersion;
-  if (!SEMVER.test(releaseVersion)) {
+  if (!isStrictSemVer(releaseVersion)) {
     ctx.printErr(
       `next-loggers packages: --release-version must be full semantic versioning, got "${releaseVersion}"`,
     );
