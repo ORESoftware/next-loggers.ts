@@ -78,7 +78,11 @@ jobs:
         run: npm run release:check
 
       - name: Validate CLI, flags-2-env, and release-catalog documentation
-        run: node --test tests/cli-flags.test.mjs tests/cli-packages.test.mjs
+        run: >-
+          node --test
+          tests/cli-flags.test.mjs
+          tests/cli-packages.test.mjs
+          tests/cli-packages-hardening.test.mjs
 
       - name: Install the pinned Zed CLI
         run: >-
