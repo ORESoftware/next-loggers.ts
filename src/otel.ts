@@ -97,6 +97,8 @@ export interface WithOpenTelemetrySpanOptions extends OtelStartSpanOptions {
   tags?: readonly string[];
   okStatusCode?: number;
   errorStatusCode?: number;
+  /** Throw when the tracer cannot start. Default false: run with a no-op span. */
+  failOnStartError?: boolean;
 }
 
 const SEVERITY_NUMBER: Record<LogLevel, number> = {
@@ -128,6 +130,15 @@ const DEFAULT_METRIC_ATTRIBUTES = [
   'service.namespace',
   'service.version',
 ] as const;
+
+const NOOP_SPAN: OtelSpanLike = Object.freeze({
+  spanContext: () => ({ traceId: '', spanId: '', traceFlags: 0 }),
+  isRecording: () => false,
+  addEvent: () => undefined,
+  recordException: () => undefined,
+  setStatus: () => undefined,
+  end: () => undefined,
+});
 
 function traceStateText(traceState: OtelSpanContextLike['traceState']): string | undefined {
   if (!traceState) {
@@ -214,7 +225,10 @@ export function logRecordToOtelAttributes(
 ): OtelAttributes {
   const maximum = Math.max(0, options.maxAttributeLength ?? 8_192);
   const maximumArrayLength = Math.max(1, Math.floor(options.maxAttributeArrayLength ?? 64));
+  // Resource attributes are applied first. Record identity and severity are
+  // authoritative and cannot be overridden by configuration.
   const attributes: OtelAttributes = {
+    ...options.attributes,
     'log.record.uid': truncate(record.id, maximum),
     'service.name': truncate(record.appName, maximum),
     'next_logger.schema': record.schema,
@@ -232,7 +246,6 @@ export function logRecordToOtelAttributes(
             .map((value) => truncate(value, maximum)),
         }
       : {}),
-    ...options.attributes,
   };
 
   if (options.includeFields ?? true) {
@@ -525,6 +538,7 @@ export async function withOpenTelemetrySpan<T>(
     tags = [],
     okStatusCode = 1,
     errorStatusCode = 2,
+    failOnStartError = false,
     ...spanOptions
   } = options;
   const lifecycleLevel = normalizeLifecycleLevel(rawLifecycleLevel);
@@ -631,6 +645,9 @@ export async function withOpenTelemetrySpan<T>(
         ['otel-bridge-error', ...tags],
         error,
       );
+      if (!failOnStartError) {
+        return await callback(NOOP_SPAN);
+      }
     }
     throw error;
   }
