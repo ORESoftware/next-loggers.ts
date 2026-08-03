@@ -1,6 +1,7 @@
 // `base` is the namespace re-export every runtime entry point carries; it holds
 // the shared surface as both values (base.r2gSmokeTest) and types (base.LogRecord).
-import { NodeLogger, base } from '@oresoftware/next-loggers';
+// Node's package root additionally promotes r2gSmokeTest for r2g phase-S.
+import { NodeLogger, base, r2gSmokeTest } from '@oresoftware/next-loggers';
 import {
   BaseLogger,
   LogEvent,
@@ -100,7 +101,11 @@ await nodeLogger.close();
 await logger.close();
 
 assert(
-  await base.r2gSmokeTest(),
+  r2gSmokeTest === base.r2gSmokeTest,
+  'the package-root phase-S export should be the shared smoke function',
+);
+assert(
+  await r2gSmokeTest(),
   'the phase-S smoke export should also pass in the TypeScript consumer',
 );
 assert(

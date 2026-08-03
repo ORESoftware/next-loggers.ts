@@ -45,6 +45,12 @@ const suites = [
     cwd: path.join(root, 'sdk', 'dart'),
   },
   {
+    name: 'Ruby',
+    command: process.env.RUBY || 'ruby',
+    args: ['test/next_loggers_test.rb'],
+    cwd: path.join(root, 'sdk', 'ruby'),
+  },
+  {
     name: 'Erlang',
     command: 'bash',
     args: ['test.sh'],
@@ -76,9 +82,7 @@ for (const suite of suites) {
     process.exitCode = 127;
     break;
   }
-  if (result.error) {
-    throw result.error;
-  }
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     process.exitCode = result.status ?? 1;
     break;
