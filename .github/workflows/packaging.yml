@@ -58,7 +58,7 @@ jobs:
       - name: Install JavaScript and Python packaging tools
         run: |
           npm ci
-          python -m pip install --upgrade "setuptools>=69" build twine
+          python -m pip install --upgrade "setuptools>=77" build twine
 
       - name: Build and validate synchronized release metadata
         run: npm run release:check
