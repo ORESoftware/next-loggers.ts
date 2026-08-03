@@ -244,7 +244,9 @@ test('secondary traceIds without a primary traceId do not claim correlation', ()
     fields: {},
     traceIds: ['secondary-only'],
   });
-  assert.doesNotMatch(metrics.registry.render(), /trace_correlated_records_total/);
+  const output = metrics.registry.render();
+  assert.match(output, /# HELP next_loggers_trace_correlated_records_total/);
+  assert.equal(lines(output, 'next_loggers_trace_correlated_records_total{').length, 0);
 });
 
 test('isErrorLevel recognizes exactly ERROR and FATAL', () => {
