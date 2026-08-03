@@ -13,7 +13,7 @@
 org = "oresoftware"
 name = "next-loggers"
 version = "0.1.0"
-description = "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, and edge workers"
+description = "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, edge workers, and polyglot services"
 license = "MIT"
 keywords = ["logging", "opentelemetry", "otel", "loki", "prometheus", "grafana", "nextjs", "esm", "supabase", "bun", "deno", "edge", "cloudflare-workers", "workerd"]
 
