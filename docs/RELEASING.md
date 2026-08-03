@@ -45,7 +45,9 @@ The equivalent environment variables are `NEXT_LOGGER_CLI_PACKAGE_TARGETS`, `NEX
 
 ## Version policy
 
-All package metadata currently advances in lockstep even though publication is independent. Before tagging, update the same semantic version in:
+All package metadata currently advances in lockstep even though publication is independent. Versions must satisfy strict Semantic Versioning 2.0.0 without a leading `v`. Numeric core and numeric prerelease identifiers cannot contain leading zeroes. The planner and release-tag verifier use byte-equivalent regular-expression sources, and CI tests both with the same positive and adversarial corpus.
+
+Before tagging, update the same semantic version in:
 
 - `package.json`, `sdk/nodejs/package.json`, and `.zpkg.toml`
 - `sdk/python/pyproject.toml`
@@ -68,7 +70,7 @@ node dist/cli/main.js flags --check
 node dist/cli/main.js packages --check
 ```
 
-The packaging workflow adds native dry runs for npm, PyPI, Cargo, Maven, pub.dev, RubyGems, and all three Hex packages. It also runs the canonical flags-2-env audit, `zed release preflight`, `zed pack`, and a full `zed r2g` consumer roundtrip.
+The packaging workflow adds native dry runs for npm, PyPI, Cargo, Maven, pub.dev, RubyGems, and all three Hex packages. It also runs canonical flags-2-env audit plus wide/narrow help, Bash completion, Zsh `compinit`/autoload, and idempotent completion installation; verifies exact and deliberately moved tags for all 12 release routes; runs `zed release preflight`; and completes `zed pack` plus a full `zed r2g` consumer roundtrip.
 
 ## First-time registry setup
 
@@ -131,6 +133,8 @@ git push origin sdk/go/v0.2.0
 git tag v0.2.0
 git push origin v0.2.0
 ```
+
+Every publishing job runs `scripts/verify-release-tag.mjs` before a build or upload. It reads the target's native manifest version, requires strict SemVer 2.0.0, constructs the one permitted tag from the target prefix, and rejects any mismatch. The test suite invokes this path for every release target with both the exact current tag and a deliberately moved `9.9.9` tag.
 
 To release every registry at the same version, create all applicable tags on the exact same reviewed commit. The workflows serialize native uploads so two registry releases do not mutate shared release state concurrently.
 
