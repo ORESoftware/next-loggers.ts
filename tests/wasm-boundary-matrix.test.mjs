@@ -296,16 +296,18 @@ test('onDecodeError receives a normalized Error instance for JSON failures', asy
   assert.equal(diagnostics[0] instanceof Error, true);
 });
 
-test('valid writes against a closed logger return -1 rather than throwing through the ABI', async () => {
-  const { logger } = memoryLogger();
+test('valid writes after logger close remain ABI-safe and are acknowledged', async () => {
+  const { logger, records } = memoryLogger();
   const memory = new WebAssembly.Memory({ initial: 1 });
   const bytes = put(memory, 0, 'closed');
   const host = createWasmLoggerHost(logger, { memory });
   await logger.close();
   assert.doesNotThrow(() => {
-    assert.equal(host.imports.next_loggers.emit_utf8(2, 0, bytes.length), -1);
+    assert.equal(host.imports.next_loggers.emit_utf8(2, 0, bytes.length), 0);
   });
   await host.flush();
+  assert.equal(records.length, 1);
+  assert.equal(records[0].message, 'closed');
 });
 
 test('concurrent flush calls both wait for all pending events', async () => {
