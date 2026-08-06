@@ -26,6 +26,14 @@ class LogLevel(str, Enum):
 
 LEVELS: Sequence[LogLevel] = tuple(LogLevel)
 _LEVEL_INDEX = {level: index for index, level in enumerate(LEVELS)}
+OTEL_SEVERITY_NUMBERS = {
+    LogLevel.TRACE: 1,
+    LogLevel.DEBUG: 5,
+    LogLevel.INFO: 9,
+    LogLevel.WARN: 13,
+    LogLevel.ERROR: 17,
+    LogLevel.FATAL: 21,
+}
 
 
 def _normalize_level(level: Any) -> LogLevel:
@@ -160,6 +168,55 @@ class MemoryTransport:
 
     def close(self) -> None:
         self.closed = True
+
+
+class OpenTelemetryTransport:
+    """Dependency-free adapter for an application-owned OTEL log emitter."""
+
+    name = "opentelemetry"
+
+    def __init__(self, emit: Callable[[Dict[str, Any]], None]) -> None:
+        if not callable(emit):
+            raise TypeError("OpenTelemetryTransport requires a callable emitter")
+        self.emit = emit
+
+    def write(self, record: LogRecord) -> None:
+        attributes: Dict[str, Any] = {
+            "service.name": record.app_name,
+            "next_logger.schema": SCHEMA,
+            "next_logger.runtime": record.runtime,
+            "log.record.uid": record.id,
+        }
+        if record.trace_id:
+            attributes["trace.id"] = record.trace_id
+        for key, value in record.fields.items():
+            attributes[f"next_logger.field.{key}"] = value
+        self.emit(
+            {
+                "body": record.message,
+                "severityText": record.level.value,
+                "severityNumber": OTEL_SEVERITY_NUMBERS[record.level],
+                "timestamp": record.timestamp,
+                "attributes": attributes,
+            }
+        )
+
+
+OtelTransport = OpenTelemetryTransport
+
+
+class SupabaseTransport:
+    """Adapter for an application-owned authenticated Supabase sender."""
+
+    name = "supabase"
+
+    def __init__(self, send: Callable[[Dict[str, Any]], None]) -> None:
+        if not callable(send):
+            raise TypeError("SupabaseTransport requires a callable sender")
+        self.send_record = send
+
+    def write(self, record: LogRecord) -> None:
+        self.send_record(record.to_dict())
 
 
 class LogEvent:
@@ -414,12 +471,16 @@ def create_logger(**options: Any) -> Logger:
 
 __all__ = [
     "LEVELS",
+    "OTEL_SEVERITY_NUMBERS",
     "SCHEMA",
     "LogEvent",
     "LogLevel",
     "LogRecord",
     "Logger",
     "MemoryTransport",
+    "OpenTelemetryTransport",
+    "OtelTransport",
+    "SupabaseTransport",
     "Transport",
     "create_logger",
 ]

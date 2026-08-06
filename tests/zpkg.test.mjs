@@ -12,6 +12,7 @@ const manifest = parseToml(await read('.zpkg.toml'));
 const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
 const lock = await read('.zpkg.lock');
+const zedInclude = await read('.zedinclude');
 
 const expectedTargets = {
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
@@ -156,6 +157,21 @@ test('root publish metadata is target-safe', () => {
   for (const pattern of ['.github/**', '.r2g/**', '**/target/**', '**/*.gem', '**/test.sh']) {
     assert.ok(manifest.publish.exclude.includes(pattern), `publish.exclude should strip ${pattern}`);
   }
+});
+
+test('generated Node release files use a bounded Zed allowlist', () => {
+  const patterns = zedInclude
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+  assert.deepEqual(patterns, [
+    'sdk/nodejs/.cli-flags.toml',
+    'sdk/nodejs/LICENSE',
+    'sdk/nodejs/README.md',
+    'sdk/nodejs/dist/**',
+    'sdk/nodejs/src/**',
+  ]);
+  assert.equal(patterns.some((pattern) => ['*', '**', '**/*'].includes(pattern)), false);
 });
 
 test('the root and every slice carry a target-local smoke contract', async () => {
