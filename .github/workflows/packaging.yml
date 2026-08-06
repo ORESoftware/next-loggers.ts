@@ -19,30 +19,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Check out immutable flags-2-env contract tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ORESoftware/flags-2-env
           ref: 611bba8f344cda4658de79c44d8954bef30cb6e5
           path: .flags2env
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.24.x"
-      - uses: actions/setup-java@v4
+          cache: false
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
