@@ -70,6 +70,8 @@ const suites = [
   },
 ];
 
+const failures = [];
+
 for (const suite of suites) {
   process.stdout.write(`\n=== ${suite.name} SDK ===\n`);
   const result = spawnSync(suite.command, suite.args, {
@@ -79,12 +81,22 @@ for (const suite of suites) {
   });
   if (result.error?.code === 'ENOENT') {
     process.stderr.write(`${suite.name} toolchain is not installed.\n`);
-    process.exitCode = 127;
-    break;
+    failures.push(`${suite.name}: toolchain is not installed`);
+    continue;
   }
-  if (result.error) throw result.error;
+  if (result.error) {
+    process.stderr.write(`${suite.name} could not start: ${result.error.message}\n`);
+    failures.push(`${suite.name}: could not start`);
+    continue;
+  }
   if (result.status !== 0) {
-    process.exitCode = result.status ?? 1;
-    break;
+    failures.push(`${suite.name}: exited with ${result.status ?? 1}`);
   }
+}
+
+if (failures.length > 0) {
+  process.stderr.write(`\nPolyglot failures:\n${failures.map(value => `- ${value}`).join('\n')}\n`);
+  process.exitCode = failures.some(value => value.includes('not installed') || value.includes('127'))
+    ? 127
+    : 1;
 }

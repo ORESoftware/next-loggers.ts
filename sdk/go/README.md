@@ -26,3 +26,14 @@ func main() {
 `Logger`, `Event`, `LogRecord`, `Options`, `Transport`, and lifecycle
 interfaces are public. Go applications can extend behavior through embedding
 and transport composition.
+
+Use `NewOpenTelemetryTransport` with an application-owned OTEL emitter and
+`NewSupabaseTransport` with an authenticated sender. Both satisfy `Transport`,
+have no SDK dependency, and never install global instrumentation:
+
+```go
+otel := nextloggers.NewOpenTelemetryTransport(func(record nextloggers.OpenTelemetryLogRecord) error {
+	return otelLogger.Emit(record)
+})
+supabase := nextloggers.NewSupabaseTransport(sendToSupabase)
+```

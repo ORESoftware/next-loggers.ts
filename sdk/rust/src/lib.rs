@@ -35,6 +35,17 @@ impl LogLevel {
             Self::Fatal => 5,
         }
     }
+
+    pub fn otel_severity_number(self) -> u8 {
+        match self {
+            Self::Trace => 1,
+            Self::Debug => 5,
+            Self::Info => 9,
+            Self::Warn => 13,
+            Self::Error => 17,
+            Self::Fatal => 21,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -109,6 +120,89 @@ pub trait Transport: Send + Sync {
 
     fn close(&self) -> Result<(), LoggerError> {
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct OpenTelemetryLogRecord {
+    pub body: String,
+    #[serde(rename = "severityText")]
+    pub severity_text: String,
+    #[serde(rename = "severityNumber")]
+    pub severity_number: u8,
+    pub timestamp: String,
+    pub attributes: JsonObject,
+}
+
+/// Dependency-free adapter for an application-owned OpenTelemetry logger.
+/// It installs no global provider, context manager, or instrumentation.
+pub struct OpenTelemetryTransport {
+    emit: Arc<dyn Fn(OpenTelemetryLogRecord) -> Result<(), LoggerError> + Send + Sync>,
+}
+
+impl OpenTelemetryTransport {
+    pub fn new<F>(emit: F) -> Self
+    where
+        F: Fn(OpenTelemetryLogRecord) -> Result<(), LoggerError> + Send + Sync + 'static,
+    {
+        Self {
+            emit: Arc::new(emit),
+        }
+    }
+}
+
+impl Transport for OpenTelemetryTransport {
+    fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
+        let mut attributes = JsonObject::from_iter([
+            (
+                "service.name".into(),
+                Value::String(record.app_name.clone()),
+            ),
+            (
+                "next_logger.schema".into(),
+                Value::String(record.schema.clone()),
+            ),
+            (
+                "next_logger.runtime".into(),
+                Value::String(record.runtime.clone()),
+            ),
+            ("log.record.uid".into(), Value::String(record.id.clone())),
+        ]);
+        if let Some(trace_id) = &record.trace_id {
+            attributes.insert("trace.id".into(), Value::String(trace_id.clone()));
+        }
+        for (key, value) in &record.fields {
+            attributes.insert(format!("next_logger.field.{key}"), value.clone());
+        }
+        (self.emit)(OpenTelemetryLogRecord {
+            body: record.message.clone(),
+            severity_text: format!("{:?}", record.level).to_uppercase(),
+            severity_number: record.level.otel_severity_number(),
+            timestamp: record.timestamp.clone(),
+            attributes,
+        })
+    }
+}
+
+/// Adapter for an application-owned authenticated Supabase sender.
+pub struct SupabaseTransport {
+    send: Arc<dyn Fn(LogRecord) -> Result<(), LoggerError> + Send + Sync>,
+}
+
+impl SupabaseTransport {
+    pub fn new<F>(send: F) -> Self
+    where
+        F: Fn(LogRecord) -> Result<(), LoggerError> + Send + Sync + 'static,
+    {
+        Self {
+            send: Arc::new(send),
+        }
+    }
+}
+
+impl Transport for SupabaseTransport {
+    fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
+        (self.send)(record.clone())
     }
 }
 

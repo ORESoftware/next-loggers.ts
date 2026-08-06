@@ -62,6 +62,35 @@ const logger = createNodeLogger({
 The OpenTelemetry packages shown above belong to the application, not this
 library. `next-loggers` intentionally has no dependency on an OTEL SDK.
 
+## Native SDK bridge contract
+
+Every native SDK exposes an explicit OTEL transport backed by a callback owned
+by the application. The callback receives the same logical record:
+
+```json
+{
+  "body": "payment failed",
+  "severityText": "ERROR",
+  "severityNumber": 17,
+  "timestamp": "2026-01-02T03:04:05.000Z",
+  "attributes": {
+    "service.name": "payments",
+    "next_logger.schema": "next-loggers/v1",
+    "next_logger.runtime": "python",
+    "log.record.uid": "record-1",
+    "trace.id": "0123456789abcdef0123456789abcdef"
+  }
+}
+```
+
+The idiomatic entry points are `OpenTelemetryTransport` in Python, Go, Rust,
+Dart, and WASM; `OtelTransport` in Java and Ruby; and `otel_transport` in
+Gleam, Erlang, and Elixir. Python also exports `OtelTransport` as an alias.
+Each SDK has a matching injected-sender Supabase transport. These adapters do
+not take ownership of application OTEL or Supabase clients, so provider startup,
+authentication, retries, flush, and shutdown remain explicit at the application
+boundary.
+
 ## Context and sampling semantics
 
 - Node.js, Bun, and Deno can use the package's explicit `AsyncLocalStorage`

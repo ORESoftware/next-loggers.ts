@@ -18,8 +18,11 @@ sdk/nodejs/README.md
 sdk/nodejs/LICENSE
 sdk/nodejs/.cli-flags.toml
 sdk/java/target/
+sdk/java/.build/
 sdk/dart/.dart_tool/
+sdk/dart/pubspec.lock
 sdk/erlang/_build/
+sdk/erlang/.build/
 sdk/elixir/_build/
 sdk/elixir/deps/
 
