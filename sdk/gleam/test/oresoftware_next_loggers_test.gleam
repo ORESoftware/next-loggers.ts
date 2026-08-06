@@ -8,6 +8,8 @@ import oresoftware_next_loggers as logging
 
 type Captured {
   Written(logging.LogRecord)
+  OtelWritten(logging.OtelLogRecord)
+  SupabaseWritten(logging.LogRecord)
   Flushed
   ExitRecords(List(logging.LogRecord))
   Closed
@@ -123,4 +125,59 @@ pub fn level_filter_and_send_false_test() {
   logging.record(local).message |> should.equal("local")
   process.receive(subject, within: 10)
   |> should.equal(Error(Nil))
+}
+
+pub fn explicit_otel_and_supabase_transports_test() {
+  let otel_subject = process.new_subject()
+  let otel_transport =
+    logging.otel_transport(fn(record) {
+      process.send(otel_subject, OtelWritten(record))
+      Ok(Nil)
+    })
+  let otel_logger = logging.new(fixture_options(), otel_transport)
+  let assert Ok(_) =
+    logging.error(otel_logger, "payment failed", [
+      json.string("payment failed"),
+    ])
+    |> logging.add_trace("0123456789abcdef0123456789abcdef")
+    |> logging.add_fields([
+      #("otel.span_id", json.string("0123456789abcdef")),
+      #("region", json.string("us-east-1")),
+    ])
+    |> logging.send
+
+  let assert Ok(OtelWritten(otel)) = process.receive(otel_subject, within: 1000)
+  let logging.OtelLogRecord(
+    body:,
+    severity_text:,
+    severity_number:,
+    attributes:,
+    ..,
+  ) = otel
+  body |> should.equal("payment failed")
+  severity_text |> should.equal("ERROR")
+  severity_number |> should.equal(17)
+  attributes
+  |> json.object
+  |> json.to_string
+  |> should.equal(
+    "{\"service.name\":\"payments\",\"next_logger.schema\":\"next-loggers/v1\",\"next_logger.runtime\":\"contract-test\",\"log.record.uid\":\"contract-record-1\",\"trace.id\":\"0123456789abcdef0123456789abcdef\",\"next_logger.field.environment\":\"test\",\"next_logger.field.otel.span_id\":\"0123456789abcdef\",\"next_logger.field.region\":\"us-east-1\"}",
+  )
+
+  let supabase_subject = process.new_subject()
+  let supabase_transport =
+    logging.supabase_transport(fn(record) {
+      process.send(supabase_subject, SupabaseWritten(record))
+      Ok(Nil)
+    })
+  let supabase_logger = logging.new(fixture_options(), supabase_transport)
+  let assert Ok(_) =
+    logging.info(supabase_logger, "cart updated", [
+      json.string("cart updated"),
+    ])
+    |> logging.send
+  let assert Ok(SupabaseWritten(record)) =
+    process.receive(supabase_subject, within: 1000)
+  record.schema |> should.equal("next-loggers/v1")
+  record.message |> should.equal("cart updated")
 }

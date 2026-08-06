@@ -40,6 +40,7 @@ exclude = [
   "node_modules/**",
   "**/node_modules/**",
   "**/.dart_tool/**",
+  "sdk/dart/pubspec.lock",
   "**/.build/**",
   "**/_build/**",
   "**/build/**",

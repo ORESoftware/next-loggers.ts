@@ -44,3 +44,14 @@ Language packages live under `sdk/`:
 | Go | `github.com/ORESoftware/next-loggers.ts/sdk/go` |
 | Rust | `oresoftware-next-loggers` / `next_loggers` |
 | Gleam | `oresoftware_next_loggers` |
+| Java | `io.github.oresoftware:next-loggers` |
+| Dart / Flutter | `oresoftware_next_loggers` |
+| Ruby | `oresoftware-next-loggers` / `ORESoftware::NextLoggers` |
+| Erlang | `oresoftware_next_loggers_erlang` / `next_loggers` |
+| Elixir | `oresoftware_next_loggers` / `NextLoggers` |
+| Rust / WebAssembly | `oresoftware-next-loggers-wasm` / `next_loggers_wasm` |
+
+All packages expose the same transport boundary: a transport receives one
+complete `next-loggers/v1` record and owns delivery. Each native SDK includes
+an explicit OpenTelemetry adapter and an authenticated-sender Supabase adapter;
+neither adapter installs global instrumentation.

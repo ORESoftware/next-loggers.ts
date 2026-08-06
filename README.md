@@ -21,6 +21,12 @@ the same logging pipeline:
 | Go | [`sdk/go`](sdk/go) |
 | Rust | [`sdk/rust`](sdk/rust) |
 | Gleam | [`sdk/gleam`](sdk/gleam) |
+| Java | [`sdk/java`](sdk/java) |
+| Dart / Flutter | [`sdk/dart`](sdk/dart) |
+| Ruby | [`sdk/ruby`](sdk/ruby) |
+| Erlang | [`sdk/erlang`](sdk/erlang) |
+| Elixir | [`sdk/elixir`](sdk/elixir) |
+| Rust / WebAssembly | [`sdk/wasm`](sdk/wasm) |
 
 All implementations emit the strict `next-loggers/v1` wire record in
 [`contracts/log-record.schema.json`](contracts/log-record.schema.json). They
@@ -29,6 +35,12 @@ lifecycle hooks, minimum-level filtering, and recovery of unsent events during
 `flush_on_exit`/`close`. Public logger, event, record, options, level, and
 transport types are exported so applications can subclass, embed, wrap, or
 compose them according to the language.
+
+Every SDK also exposes dependency-free, application-owned OpenTelemetry and
+Supabase transports. The application injects its OTEL emitter or authenticated
+Supabase sender; the logger never registers a global telemetry provider or
+patches a runtime. The common OTEL bridge shape is documented in
+[`docs/otel.md`](docs/otel.md).
 
 Run every native conformance suite with:
 

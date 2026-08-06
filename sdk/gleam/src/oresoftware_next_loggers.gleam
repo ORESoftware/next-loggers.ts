@@ -43,6 +43,16 @@ pub type LogRecord {
   )
 }
 
+pub type OtelLogRecord {
+  OtelLogRecord(
+    body: String,
+    severity_text: String,
+    severity_number: Int,
+    timestamp: String,
+    attributes: JsonObject,
+  )
+}
+
 pub type Transport {
   Transport(
     write: fn(LogRecord) -> Result(Nil, String),
@@ -113,6 +123,49 @@ pub fn noop_transport() -> Transport {
     flush: fn() { Ok(Nil) },
     flush_on_exit: fn(_) { Ok(Nil) },
     close: fn() { Ok(Nil) },
+  )
+}
+
+/// Adapt records to an application-owned OpenTelemetry emitter without
+/// installing a global provider or automatic instrumentation.
+pub fn otel_transport(
+  sink: fn(OtelLogRecord) -> Result(Nil, String),
+) -> Transport {
+  Transport(
+    write: fn(record) { sink(to_otel_record(record)) },
+    flush: fn() { Ok(Nil) },
+    flush_on_exit: fn(_) { Ok(Nil) },
+    close: fn() { Ok(Nil) },
+  )
+}
+
+/// Delegate records to an application-owned authenticated Supabase sender.
+pub fn supabase_transport(
+  sender: fn(LogRecord) -> Result(Nil, String),
+) -> Transport {
+  Transport(
+    write: sender,
+    flush: fn() { Ok(Nil) },
+    flush_on_exit: fn(_) { Ok(Nil) },
+    close: fn() { Ok(Nil) },
+  )
+}
+
+pub fn to_otel_record(record: LogRecord) -> OtelLogRecord {
+  let base_attributes = [
+    #("service.name", json.string(record.app_name)),
+    #("next_logger.schema", json.string(record.schema)),
+    #("next_logger.runtime", json.string(record.runtime)),
+    #("log.record.uid", json.string(record.id)),
+  ]
+  let correlated = optional_string(base_attributes, "trace.id", record.trace_id)
+  let attributes = otel_field_attributes(record.fields, correlated)
+  OtelLogRecord(
+    body: record.message,
+    severity_text: level_name(record.level),
+    severity_number: otel_severity_number(record.level),
+    timestamp: record.timestamp,
+    attributes:,
   )
 }
 
@@ -380,6 +433,31 @@ pub fn level_name(level: Level) -> String {
     Warn -> "WARN"
     ErrorLevel -> "ERROR"
     Fatal -> "FATAL"
+  }
+}
+
+pub fn otel_severity_number(level: Level) -> Int {
+  case level {
+    Trace -> 1
+    Debug -> 5
+    Info -> 9
+    Warn -> 13
+    ErrorLevel -> 17
+    Fatal -> 21
+  }
+}
+
+fn otel_field_attributes(
+  fields: JsonObject,
+  attributes: JsonObject,
+) -> JsonObject {
+  case fields {
+    [] -> attributes
+    [#(key, value), ..rest] ->
+      otel_field_attributes(
+        rest,
+        list.append(attributes, [#("next_logger.field." <> key, value)]),
+      )
   }
 }
 

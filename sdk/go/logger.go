@@ -36,6 +36,27 @@ var levelIndex = map[Level]int{
 	Fatal: 5,
 }
 
+// OTELSeverityNumber maps next-loggers levels onto OpenTelemetry severity
+// numbers without importing or registering a global OpenTelemetry SDK.
+func (level Level) OTELSeverityNumber() int {
+	switch level {
+	case Trace:
+		return 1
+	case Debug:
+		return 5
+	case Info:
+		return 9
+	case Warn:
+		return 13
+	case Error:
+		return 17
+	case Fatal:
+		return 21
+	default:
+		return 0
+	}
+}
+
 type LogRecord struct {
 	Schema       string           `json:"schema"`
 	ID           string           `json:"id"`
@@ -116,6 +137,72 @@ func (transport *MemoryTransport) Close() error {
 	defer transport.mu.Unlock()
 	transport.Closed = true
 	return nil
+}
+
+// OpenTelemetryLogRecord is the dependency-free boundary passed to an
+// application-owned OpenTelemetry logger.
+type OpenTelemetryLogRecord struct {
+	Body           string         `json:"body"`
+	SeverityText   string         `json:"severityText"`
+	SeverityNumber int            `json:"severityNumber"`
+	Timestamp      string         `json:"timestamp"`
+	Attributes     map[string]any `json:"attributes"`
+}
+
+type OpenTelemetryEmitter func(OpenTelemetryLogRecord) error
+
+// OpenTelemetryTransport adapts next-loggers records to an injected OTEL
+// emitter. It never installs global providers or automatic instrumentation.
+type OpenTelemetryTransport struct {
+	Emit OpenTelemetryEmitter
+}
+
+func NewOpenTelemetryTransport(emit OpenTelemetryEmitter) *OpenTelemetryTransport {
+	return &OpenTelemetryTransport{Emit: emit}
+}
+
+func (transport *OpenTelemetryTransport) Write(record LogRecord) error {
+	if transport == nil || transport.Emit == nil {
+		return errors.New("nextloggers: OpenTelemetry emitter is required")
+	}
+	attributes := map[string]any{
+		"service.name":        record.AppName,
+		"next_logger.schema":  record.Schema,
+		"next_logger.runtime": record.Runtime,
+		"log.record.uid":      record.ID,
+	}
+	if record.TraceID != "" {
+		attributes["trace.id"] = record.TraceID
+	}
+	for key, value := range record.Fields {
+		attributes["next_logger.field."+key] = value
+	}
+	return transport.Emit(OpenTelemetryLogRecord{
+		Body:           record.Message,
+		SeverityText:   string(record.Level),
+		SeverityNumber: record.Level.OTELSeverityNumber(),
+		Timestamp:      record.Timestamp,
+		Attributes:     attributes,
+	})
+}
+
+type SupabaseSender func(LogRecord) error
+
+// SupabaseTransport delegates delivery to an application-owned authenticated
+// Supabase sender, which may use Realtime, HTTP ingestion, or another client.
+type SupabaseTransport struct {
+	Send SupabaseSender
+}
+
+func NewSupabaseTransport(send SupabaseSender) *SupabaseTransport {
+	return &SupabaseTransport{Send: send}
+}
+
+func (transport *SupabaseTransport) Write(record LogRecord) error {
+	if transport == nil || transport.Send == nil {
+		return errors.New("nextloggers: Supabase sender is required")
+	}
+	return transport.Send(record)
 }
 
 type Options struct {
