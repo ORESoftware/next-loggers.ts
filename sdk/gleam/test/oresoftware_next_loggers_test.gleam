@@ -41,6 +41,7 @@ fn transport(subject: process.Subject(Captured)) -> logging.Transport {
       process.send(subject, Closed)
       Ok(Nil)
     },
+    is_otel: False,
   )
 }
 
@@ -180,4 +181,53 @@ pub fn explicit_otel_and_supabase_transports_test() {
     process.receive(supabase_subject, within: 1000)
   record.schema |> should.equal("next-loggers/v1")
   record.message |> should.equal("cart updated")
+}
+
+pub fn per_event_otel_routing_test() {
+  let subject = process.new_subject()
+  let transport =
+    logging.otel_transport(fn(record) {
+      process.send(subject, OtelWritten(record))
+      Ok(Nil)
+    })
+  let logger = logging.new(fixture_options(), transport)
+
+  let assert Ok(_) =
+    logging.info(logger, "default on", [])
+    |> logging.send
+  let assert Ok(_) =
+    logging.warn(logger, "opted out", [])
+    |> logging.not_otel
+    |> logging.send
+  let assert Ok(_) =
+    logging.error(logger, "opted back in", [])
+    |> logging.not_otel
+    |> logging.use_otel
+    |> logging.send
+
+  let assert Ok(OtelWritten(first)) = process.receive(subject, within: 1000)
+  first.body |> should.equal("default on")
+  let assert Ok(OtelWritten(second)) = process.receive(subject, within: 1000)
+  second.body |> should.equal("opted back in")
+  process.receive(subject, within: 50) |> should.be_error
+
+  // otel: False makes OpenTelemetry opt-in per event.
+  let opt_in_options = logging.Options(..fixture_options(), otel: False)
+  let opt_in = logging.new(opt_in_options, transport)
+  let assert Ok(_) =
+    logging.info(opt_in, "skipped", [])
+    |> logging.send
+  process.receive(subject, within: 50) |> should.be_error
+  let assert Ok(_) =
+    logging.info(opt_in, "selected", [])
+    |> logging.use_otel
+    |> logging.send
+  let assert Ok(OtelWritten(third)) = process.receive(subject, within: 1000)
+  third.body |> should.equal("selected")
+  let assert Ok(_) =
+    logging.info(opt_in, "reset follows default", [])
+    |> logging.use_otel
+    |> logging.reset_otel
+    |> logging.send
+  process.receive(subject, within: 50) |> should.be_error
 }

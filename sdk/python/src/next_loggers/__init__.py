@@ -174,6 +174,8 @@ class OpenTelemetryTransport:
     """Dependency-free adapter for an application-owned OTEL log emitter."""
 
     name = "opentelemetry"
+    # Lets per-event use_otel()/not_otel() route around this transport.
+    otel = True
 
     def __init__(self, emit: Callable[[Dict[str, Any]], None]) -> None:
         if not callable(emit):
@@ -238,6 +240,28 @@ class LogEvent:
         self.stack_trace: List[str] = []
         self._record: Optional[LogRecord] = None
         self._sent = False
+        # None = follow the logger default; True/False = explicit per-event choice.
+        self.otel: Optional[bool] = None
+
+    def use_otel(self) -> "LogEvent":
+        """Force this record onto OTEL transports, even when the logger opts out."""
+        return self.with_otel(True)
+
+    def not_otel(self) -> "LogEvent":
+        """Keep this record off OTEL transports; other transports still receive it."""
+        return self.with_otel(False)
+
+    def with_otel(self, enabled: bool) -> "LogEvent":
+        self.otel = bool(enabled)
+        return self
+
+    def reset_otel(self) -> "LogEvent":
+        """Drop the per-event choice so the logger default decides again."""
+        self.otel = None
+        return self
+
+    def otel_enabled(self, fallback: bool) -> bool:
+        return fallback if self.otel is None else self.otel
 
     def add_fields(self, fields: Mapping[str, Any]) -> "LogEvent":
         self.fields.update(fields)
@@ -345,6 +369,7 @@ class Logger:
         logged_in_user: Optional[Mapping[str, Any]] = None,
         transports: Optional[Iterable[Transport]] = None,
         console: bool = True,
+        otel: bool = True,
         id_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
         clock: Callable[[], str] = _default_clock,
     ) -> None:
@@ -356,6 +381,8 @@ class Logger:
         self.current_user = dict(logged_in_user or {})
         self.transports = list(transports or [])
         self.console = console
+        # Default routing for OTEL transports when an event makes no choice.
+        self.otel = bool(otel)
         self.id_factory = id_factory
         self.clock = clock
         self._unsent: set[LogEvent] = set()
@@ -394,6 +421,28 @@ class Logger:
     def fatal(self, *values: Any) -> LogEvent:
         return self._event(LogLevel.FATAL, values)
 
+    def use_otel(self) -> "Logger":
+        """Send every record to OTEL transports unless the event calls not_otel()."""
+        return self.with_otel(True)
+
+    def not_otel(self) -> "Logger":
+        """Make OpenTelemetry opt-in: only events calling use_otel() reach it."""
+        return self.with_otel(False)
+
+    def with_otel(self, enabled: bool) -> "Logger":
+        with self._lock:
+            self.otel = bool(enabled)
+        return self
+
+    @staticmethod
+    def is_otel_transport(transport: Transport) -> bool:
+        return bool(getattr(transport, "otel", False)) or getattr(transport, "name", "") == "opentelemetry"
+
+    def transports_for(self, event: LogEvent) -> List[Transport]:
+        if event.otel_enabled(self.otel):
+            return list(self.transports)
+        return [t for t in self.transports if not self.is_otel_transport(t)]
+
     def add_fields(self, fields: Mapping[str, Any]) -> "Logger":
         with self._lock:
             self.fields.update(fields)
@@ -421,7 +470,7 @@ class Logger:
                 file=sys.stderr if record.level in (LogLevel.ERROR, LogLevel.FATAL) else sys.stdout,
             )
         if store:
-            for transport in self.transports:
+            for transport in self.transports_for(event):
                 transport.write(record)
         return record
 

@@ -110,6 +110,12 @@ impl From<serde_json::Error> for LoggerError {
 pub trait Transport: Send + Sync {
     fn write(&self, record: &LogRecord) -> Result<(), LoggerError>;
 
+    /// Marks this transport as an OpenTelemetry bridge so per-event
+    /// `use_otel()` / `not_otel()` can route around it.
+    fn is_otel(&self) -> bool {
+        false
+    }
+
     fn flush(&self) -> Result<(), LoggerError> {
         Ok(())
     }
@@ -152,6 +158,10 @@ impl OpenTelemetryTransport {
 }
 
 impl Transport for OpenTelemetryTransport {
+    fn is_otel(&self) -> bool {
+        true
+    }
+
     fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
         let mut attributes = JsonObject::from_iter([
             (
@@ -296,6 +306,10 @@ pub struct Options {
     pub logged_in_user: JsonObject,
     pub transports: Vec<Arc<dyn Transport>>,
     pub console: bool,
+    /// Default routing for OTEL transports. `true` (the default) delivers
+    /// every record; `false` makes OpenTelemetry opt-in per event via
+    /// `logger.info(values).use_otel().send()`.
+    pub otel: bool,
     pub id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     pub clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
@@ -311,6 +325,7 @@ impl Default for Options {
             logged_in_user: JsonObject::new(),
             transports: Vec::new(),
             console: true,
+            otel: true,
             id_factory: Arc::new(default_id),
             clock: Arc::new(default_clock),
         }
@@ -353,6 +368,7 @@ struct LoggerInner {
     current_user: Mutex<JsonObject>,
     transports: Vec<Arc<dyn Transport>>,
     console: bool,
+    otel: AtomicBool,
     id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
     unsent: Mutex<HashMap<u64, Arc<Mutex<EventState>>>>,
@@ -372,6 +388,7 @@ impl Logger {
                 current_user: Mutex::new(options.logged_in_user),
                 transports: options.transports,
                 console: options.console,
+                otel: AtomicBool::new(options.otel),
                 id_factory: options.id_factory,
                 clock: options.clock,
                 unsent: Mutex::new(HashMap::new()),
@@ -446,6 +463,25 @@ impl Logger {
         self
     }
 
+    /// Sends every record to OTEL transports unless the event calls `not_otel()`.
+    pub fn use_otel(&self) -> &Self {
+        self.with_otel(true)
+    }
+
+    /// Makes OpenTelemetry opt-in: only events calling `use_otel()` reach OTEL transports.
+    pub fn not_otel(&self) -> &Self {
+        self.with_otel(false)
+    }
+
+    pub fn with_otel(&self, enabled: bool) -> &Self {
+        self.inner.otel.store(enabled, Ordering::Release);
+        self
+    }
+
+    pub fn otel_enabled(&self) -> bool {
+        self.inner.otel.load(Ordering::Acquire)
+    }
+
     fn emit(&self, event: &Event, store: bool) -> Result<Option<LogRecord>, LoggerError> {
         self.inner
             .unsent
@@ -468,7 +504,11 @@ impl Logger {
             );
         }
         if store {
+            let include_otel = event.otel_enabled(self.otel_enabled())?;
             for transport in &self.inner.transports {
+                if !include_otel && transport.is_otel() {
+                    continue;
+                }
                 transport.write(&record)?;
             }
         }
@@ -543,6 +583,7 @@ struct EventState {
     meta: Vec<Value>,
     errors: Vec<Value>,
     stack_trace: Vec<String>,
+    otel: Option<bool>,
     sent: bool,
     record: Option<LogRecord>,
 }
@@ -563,6 +604,7 @@ impl EventState {
             meta: Vec::new(),
             errors: Vec::new(),
             stack_trace: Vec::new(),
+            otel: None,
             sent: false,
             record: None,
         }
@@ -570,6 +612,7 @@ impl EventState {
 }
 
 #[derive(Clone)]
+#[must_use = "a next-loggers event is only delivered when .send() is called"]
 pub struct Event {
     logger: Logger,
     id: u64,
@@ -583,6 +626,38 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 }
 
 impl Event {
+    /// Forces this record onto OTEL transports, even when the logger opts out
+    /// by default.
+    pub fn use_otel(self) -> Self {
+        self.with_otel(true)
+    }
+
+    /// Keeps this record off OTEL transports; every other transport still
+    /// receives it.
+    pub fn not_otel(self) -> Self {
+        self.with_otel(false)
+    }
+
+    pub fn with_otel(self, enabled: bool) -> Self {
+        self.state.lock().expect("event state poisoned").otel = Some(enabled);
+        self
+    }
+
+    /// Drops the per-event choice so the logger default decides again.
+    pub fn reset_otel(self) -> Self {
+        self.state.lock().expect("event state poisoned").otel = None;
+        self
+    }
+
+    /// Resolves the per-event choice against the logger default.
+    pub fn otel_enabled(&self, fallback: bool) -> Result<bool, LoggerError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?;
+        Ok(state.otel.unwrap_or(fallback))
+    }
+
     pub fn add_fields(self, fields: JsonObject) -> Self {
         self.state
             .lock()
