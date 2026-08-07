@@ -77,6 +77,11 @@ module ORESoftware
         @sink = sink
       end
 
+      # Lets per-call otel: false routing skip this transport.
+      def otel?
+        true
+      end
+
       def write(record)
         attributes = {
           "service.name" => record.fetch("appName"),
@@ -121,6 +126,7 @@ module ORESoftware
         runtime: "ruby",
         fields: {},
         transports: [],
+        otel: true,
         id_factory: -> { SecureRandom.uuid },
         clock: -> { Time.now.utc.iso8601(3) }
       )
@@ -133,8 +139,31 @@ module ORESoftware
         @runtime = runtime.to_s.strip.empty? ? "ruby" : runtime.to_s
         @fields = stringify_keys(fields).freeze
         @transports = Array(transports).freeze
+        # Default routing for OTEL transports when a call says nothing.
+        @otel = otel ? true : false
         @id_factory = id_factory
         @clock = clock
+      end
+
+      attr_reader :otel
+
+      # Derived logger that sends every record to OTEL transports.
+      # Ruby level methods take a bare fields hash, so routing is chosen on the
+      # logger rather than as a keyword: `logger.use_otel.info("msg", id: 1)`.
+      def use_otel
+        with_otel(true)
+      end
+
+      # Derived logger that keeps records off OTEL transports; every other
+      # transport still receives them.
+      def not_otel
+        with_otel(false)
+      end
+
+      def with_otel(enabled)
+        derived = dup
+        derived.instance_variable_set(:@otel, enabled ? true : false)
+        derived
       end
 
       def log(level, message, fields = {})
@@ -171,7 +200,7 @@ module ORESoftware
         record["tags"] = context.tags unless context.nil? || context.tags.empty?
         record.freeze
 
-        @transports.each do |transport|
+        transports_for(@otel).each do |transport|
           if transport.respond_to?(:write)
             transport.write(record)
           elsif transport.respond_to?(:call)
@@ -190,6 +219,16 @@ module ORESoftware
       end
 
       private
+
+      def transports_for(include_otel)
+        return @transports if include_otel
+
+        @transports.reject { |transport| otel_transport?(transport) }
+      end
+
+      def otel_transport?(transport)
+        transport.respond_to?(:otel?) && transport.otel?
+      end
 
       def stringify_keys(value)
         raise ArgumentError, "fields must be a Hash" unless value.is_a?(Hash)

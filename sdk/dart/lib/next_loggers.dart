@@ -50,8 +50,13 @@ abstract interface class LogTransport {
   FutureOr<void> write(Map<String, Object?> record);
 }
 
+/// Marker for OpenTelemetry bridge transports so `Logger.notOtel()` and the
+/// per-call `otel:` argument can route around them. A hand-rolled OTEL
+/// transport should implement this alongside [LogTransport].
+abstract interface class OtelBridgeTransport implements LogTransport {}
+
 /// Application-owned OTEL sink. This package never registers a global SDK.
-final class OpenTelemetryTransport implements LogTransport {
+final class OpenTelemetryTransport implements LogTransport, OtelBridgeTransport {
   OpenTelemetryTransport(this.emit);
 
   final RecordSender emit;
@@ -97,6 +102,7 @@ final class Logger {
     this.runtime = 'dart',
     Map<String, Object?> fields = const <String, Object?>{},
     List<LogTransport> transports = const <LogTransport>[],
+    this.otel = true,
     String Function()? idFactory,
     String Function()? clock,
   })  : fields = Map.unmodifiable(fields),
@@ -109,14 +115,40 @@ final class Logger {
   final String runtime;
   final Map<String, Object?> fields;
   final List<LogTransport> transports;
+
+  /// Default routing for OTEL transports when a call makes no choice of its own.
+  final bool otel;
   final String Function() _idFactory;
   final String Function() _clock;
 
+  /// Derived logger that delivers every record to OTEL transports (the default).
+  Logger useOtel() => withOtel(true);
+
+  /// Derived logger that keeps records off OTEL transports; every other
+  /// transport still receives them.
+  Logger notOtel() => withOtel(false);
+
+  Logger withOtel(bool enabled) => enabled == otel
+      ? this
+      : Logger(
+          appName: appName,
+          name: name,
+          runtime: runtime,
+          fields: fields,
+          transports: transports,
+          otel: enabled,
+          idFactory: _idFactory,
+          clock: _clock,
+        );
+
+  /// [otel] overrides this call's routing: `true` forces delivery to OTEL
+  /// transports, `false` skips them, `null` follows the logger default.
   Future<Map<String, Object?>> log(
     LogLevel level,
     String message, {
     Map<String, Object?> eventFields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
+    bool? otel,
   }) async {
     if (appName.trim().isEmpty) {
       throw ArgumentError.value(appName, 'appName', 'must not be empty');
@@ -147,7 +179,11 @@ final class Logger {
       if (context != null && context.tags.isNotEmpty) 'tags': List<String>.from(context.tags),
     };
     final immutable = _deepCopy(record);
+    final includeOtel = otel ?? this.otel;
     for (final transport in transports) {
+      if (!includeOtel && transport is OtelBridgeTransport) {
+        continue;
+      }
       await transport.write(immutable);
     }
     return immutable;
@@ -156,14 +192,23 @@ final class Logger {
   Future<Map<String, Object?>> info(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
+    bool? otel,
   }) =>
-      log(LogLevel.info, message, eventFields: fields);
+      log(LogLevel.info, message, eventFields: fields, otel: otel);
+
+  Future<Map<String, Object?>> warn(
+    String message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    bool? otel,
+  }) =>
+      log(LogLevel.warn, message, eventFields: fields, otel: otel);
 
   Future<Map<String, Object?>> error(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
+    bool? otel,
   }) =>
-      log(LogLevel.error, message, eventFields: fields);
+      log(LogLevel.error, message, eventFields: fields, otel: otel);
 
   static String _randomId() {
     final random = Random.secure();

@@ -73,6 +73,23 @@ public final class NextLoggersTest {
       }
     }
 
+    List<Map<String, Object>> routedOtel = new ArrayList<>();
+    List<Map<String, Object>> routedAll = new ArrayList<>();
+    NextLoggers.Logger routed =
+        new NextLoggers.Logger(
+            "checkout",
+            List.of(
+                new NextLoggers.OtelTransport(routedOtel::add),
+                new NextLoggers.SupabaseTransport(routedAll::add)));
+    routed.info("default on", Map.of());
+    routed.notOtel().warn("opted out", Map.of());
+    routed.notOtel().useOtel().error("opted back in", Map.of());
+    assert routedOtel.size() == 2 : "notOtel() must skip the OTEL transport";
+    assert "default on".equals(routedOtel.get(0).get("body"));
+    assert "opted back in".equals(routedOtel.get(1).get("body"));
+    assert routedAll.size() == 3 : "other transports must receive every record";
+    assert routed.otelEnabled() : "notOtel() must return a derived logger";
+
     System.out.println("Java next-loggers conformance passed");
   }
 }
