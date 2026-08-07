@@ -14,3 +14,18 @@ Maven coordinates:
   <version>0.1.0</version>
 </dependency>
 ```
+
+## OpenTelemetry on or off
+
+`OtelTransport` overrides `isOtel()` to `true`, so records can be routed around
+it without touching the OTEL SDK. `useOtel()` and `notOtel()` return a derived
+logger sharing the same transports:
+
+```java
+logger.notOtel().warn("noisy poll", Map.of());  // other transports still receive it
+logger.useOtel().error("paged", Map.of());
+```
+
+The `Logger(appName, name, runtime, fields, transports, otel)` constructor sets
+the default. Records are delivered as the call returns, so there is no
+unsent-event state to forget.

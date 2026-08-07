@@ -25,3 +25,27 @@ let otel = Arc::new(next_loggers::OpenTelemetryTransport::new(|record| {
 }));
 let supabase = Arc::new(next_loggers::SupabaseTransport::new(send_to_supabase));
 ```
+
+## OpenTelemetry on or off, per event
+
+`OpenTelemetryTransport` returns `true` from `Transport::is_otel`, so a single
+record can opt in or out without touching the OTEL SDK:
+
+```rust
+logger.info(values).use_otel().send()?;
+logger.warn(values).not_otel().send()?;   // other transports still receive it
+logger.error(values).with_otel(export_errors).send()?;
+```
+
+`Options::otel` sets the default those events fall back to (`false` makes
+OpenTelemetry opt-in), and `logger.use_otel()` / `logger.not_otel()` flip it
+later. Any transport can join the routing by overriding `is_otel`.
+
+## Missing `send()`
+
+`Event` is `#[must_use]`, so dropping one is a compiler warning:
+
+```
+warning: unused `Event` that must be used
+  = note: a next-loggers event is only delivered when .send() is called
+```
