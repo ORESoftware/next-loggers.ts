@@ -27,6 +27,12 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+next-loggers-lint = "next_loggers.lint:main"
+
+[project.entry-points."flake8.extension"]
+NL1 = "next_loggers.lint:Plugin"
+
 [project.urls]
 Homepage = "https://github.com/ORESoftware/next-loggers.ts"
 Repository = "https://github.com/ORESoftware/next-loggers.ts/tree/main/sdk/python"
