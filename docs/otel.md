@@ -91,6 +91,69 @@ not take ownership of application OTEL or Supabase clients, so provider startup,
 authentication, retries, flush, and shutdown remain explicit at the application
 boundary.
 
+## Choosing OpenTelemetry per call
+
+OTEL is a transport like any other, so a record can be routed around it without
+touching the OTEL SDK. The choice is made on the event, so nothing else about
+the call site changes:
+
+```ts
+log.info('charged').useOtel().send();   // force delivery to OTEL transports
+log.warn('noisy poll').notOtel().send(); // every other transport still gets it
+log.error('failed').withOtel(exportErrors).send(); // computed at runtime
+log.info('x').useOtel().resetOtel().send(); // back to the logger default
+```
+
+The logger sets the default the events fall back to. `otel: true` (the default)
+delivers everything and lets `notOtel()` opt out; `otel: false` makes
+OpenTelemetry opt-in, so only `useOtel()` events are exported:
+
+```ts
+const logger = createNodeLogger(withOpenTelemetry(
+  { appName: 'payments' },
+  { logger: logs.getLogger('payments'), activeSpan, otel: false },
+));
+logger.useOtel();  // or logger.notOtel() — inherited by anew() children
+```
+
+`withOpenTelemetry(loggerOptions, bridge)` is a convenience that appends the
+transport and, when `activeSpan` is supplied, installs the span-correlation
+context provider. It composes with any runtime factory and keeps existing
+transports and an explicitly supplied `contextProvider`.
+
+Skipping OTEL skips the whole bridge for that record: no `logger.emit`, no span
+event, no `recordException`/`setStatus`, no metric increment. Correlation
+fields already resolved by the context provider stay on the record, so the
+trace ids remain visible to the transports that do receive it. Records are
+unchanged on the wire: the choice is delivery routing, not a schema field.
+
+A transport is recognized as an OTEL bridge when it reports it — the
+`OpenTelemetryTransport` shipped here sets `otel = true`, and a hand-rolled
+bridge should set the same flag (the transport name `opentelemetry` is also
+accepted).
+
+### The same control in every SDK
+
+| SDK | Per-record choice | Logger default |
+| --- | --- | --- |
+| TypeScript/JavaScript | `event.useOtel()` / `.notOtel()` / `.withOtel(bool)` / `.resetOtel()` | `otel` option, `logger.useOtel()` / `.notOtel()` |
+| Go | `event.UseOtel()` / `.NotOtel()` / `.WithOtel(bool)` / `.ResetOtel()` | `Options.Otel *bool`, `logger.UseOtel()` / `.NotOtel()` |
+| Rust | `event.use_otel()` / `.not_otel()` / `.with_otel(bool)` / `.reset_otel()` | `Options.otel`, `logger.use_otel()` / `.not_otel()` |
+| Python | `event.use_otel()` / `.not_otel()` / `.with_otel(bool)` / `.reset_otel()` | `otel=` argument, `logger.use_otel()` / `.not_otel()` |
+| Gleam | `logging.use_otel` / `not_otel` / `with_otel` / `reset_otel` in the pipeline | `Options.otel` |
+| Dart | `otel:` argument on `log`/`info`/`warn`/`error` | `otel:` constructor argument, `logger.useOtel()` / `.notOtel()` (derived logger) |
+| Erlang | `next_loggers:log/5` with an explicit boolean | `next_loggers:use_otel/1` / `not_otel/1` (derived logger) |
+| Elixir | `ORESoftware.NextLoggers.log/5` with an explicit boolean | `use_otel/1` / `not_otel/1` (derived logger) |
+| Java | — | `logger.useOtel()` / `.notOtel()` (derived logger) |
+| Ruby | — | `logger.use_otel` / `.not_otel` (derived logger) |
+| WASM | `log_with(.., Some(bool))` | `Logger::use_otel()` / `not_otel()` |
+
+Java, Ruby, and the WASM core deliver at the call site rather than through a
+deferred event, so their routing choice is made on the logger or the call
+itself. In Erlang and Elixir `otel_transport/1` returns a tagged transport
+(`{otel, Fun}` / `{:otel, fun}`) so routing can skip it without inspecting the
+closure; bare function transports keep working unchanged.
+
 ## Context and sampling semantics
 
 - Node.js, Bun, and Deno can use the package's explicit `AsyncLocalStorage`

@@ -6,8 +6,14 @@
     current_context/0,
     with_context/2,
     log/4,
+    log/5,
     info/3,
+    warn/3,
     error/3,
+    use_otel/1,
+    not_otel/1,
+    with_otel/2,
+    otel_enabled/1,
     otel_transport/1,
     supabase_transport/1
 ]).
@@ -22,7 +28,14 @@ new(AppName, Runtime, Fields, Transports)
         when is_binary(AppName), is_binary(Runtime), is_map(Fields), is_list(Transports) ->
     case byte_size(AppName) of
         0 -> error({invalid_app_name, AppName});
-        _ -> #{app_name => AppName, runtime => Runtime, fields => Fields, transports => Transports}
+        _ -> #{
+            app_name => AppName,
+            runtime => Runtime,
+            fields => Fields,
+            transports => Transports,
+            %% Default routing for OTEL transports when a call says nothing.
+            otel => true
+        }
     end.
 
 current_context() ->
@@ -44,14 +57,34 @@ with_context(Context, Fun) when is_map(Context), is_function(Fun, 0) ->
         end
     end.
 
+%% Derived logger that delivers every record to OTEL transports (the default).
+use_otel(Logger) when is_map(Logger) -> with_otel(Logger, true).
+
+%% Derived logger that keeps records off OTEL transports; every other transport
+%% still receives them: next_loggers:log(next_loggers:not_otel(L), ...).
+not_otel(Logger) when is_map(Logger) -> with_otel(Logger, false).
+
+with_otel(Logger, Enabled) when is_map(Logger), is_boolean(Enabled) ->
+    maps:put(otel, Enabled, Logger).
+
+otel_enabled(Logger) when is_map(Logger) -> maps:get(otel, Logger, true).
+
 info(Logger, Message, Fields) ->
     log(Logger, <<"INFO">>, Message, Fields).
+
+warn(Logger, Message, Fields) ->
+    log(Logger, <<"WARN">>, Message, Fields).
 
 error(Logger, Message, Fields) ->
     log(Logger, <<"ERROR">>, Message, Fields).
 
-log(Logger, Level, Message, EventFields)
-        when is_map(Logger), is_binary(Level), is_binary(Message), is_map(EventFields) ->
+log(Logger, Level, Message, EventFields) ->
+    log(Logger, Level, Message, EventFields, otel_enabled(Logger)).
+
+%% Otel overrides this call's routing regardless of the logger default.
+log(Logger, Level, Message, EventFields, Otel)
+        when is_map(Logger), is_binary(Level), is_binary(Message), is_map(EventFields),
+             is_boolean(Otel) ->
     Context = current_context(),
     LoggerFields = maps:get(fields, Logger, #{}),
     ContextFields = maps:get(fields, Context, #{}),
@@ -83,13 +116,22 @@ log(Logger, Level, Message, EventFields)
         [] -> Record2;
         _ -> maps:put(tags, Tags, Record2)
     end,
-    lists:foreach(fun(Transport) -> ok = Transport(Record) end, maps:get(transports, Logger, [])),
+    lists:foreach(
+        fun(Transport) -> deliver(Transport, Record, Otel) end,
+        maps:get(transports, Logger, [])
+    ),
     Record.
+
+%% otel_transport/1 returns a tagged transport so routing can skip it without
+%% inspecting the closure.
+deliver({otel, _Fun}, _Record, false) -> ok;
+deliver({otel, Fun}, Record, _Otel) when is_function(Fun, 1) -> ok = Fun(Record);
+deliver(Fun, Record, _Otel) when is_function(Fun, 1) -> ok = Fun(Record).
 
 %% Application-owned OpenTelemetry adapter. It emits data but never installs
 %% a tracer, logger provider, context manager, or automatic instrumentation.
 otel_transport(Sink) when is_function(Sink, 1) ->
-    fun(Record) ->
+    {otel, fun(Record) ->
         Level = maps:get(level, Record),
         Fields = maps:get(fields, Record, #{}),
         Attributes0 = #{
@@ -114,7 +156,7 @@ otel_transport(Sink) when is_function(Sink, 1) ->
             attributes => Attributes
         }),
         ok
-    end.
+    end}.
 
 %% Client transport with an injected authenticated Supabase sender.
 supabase_transport(Sender) when is_function(Sender, 1) ->

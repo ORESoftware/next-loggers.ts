@@ -40,3 +40,31 @@ transports and install no global providers:
 let otel = logging.otel_transport(emit_to_otel)
 let supabase = logging.supabase_transport(send_to_supabase)
 ```
+
+## OpenTelemetry on or off, per event
+
+`otel_transport` sets `is_otel: True` on the transport, so a single record can
+opt in or out of it inside the pipeline:
+
+```gleam
+logging.info(logger, "charged", [])
+|> logging.use_otel
+|> logging.send
+
+logging.warn(logger, "noisy poll", [])
+|> logging.not_otel
+|> logging.send
+```
+
+`Options.otel` sets the default events fall back to; `with_otel(event, bool)`
+takes a runtime flag and `reset_otel` returns an event to the default.
+
+## Missing `send`
+
+The compiler flags an unused `Result` from `send`, but not an event that is
+never piped into it. The polyglot checker covers that case, including `|>`
+pipelines:
+
+```sh
+npx next-loggers lint src/
+```

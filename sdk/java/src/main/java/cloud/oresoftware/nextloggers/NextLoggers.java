@@ -76,6 +76,14 @@ public final class NextLoggers {
   @FunctionalInterface
   public interface Transport {
     void write(Map<String, Object> record) throws Exception;
+
+    /**
+     * Marks this transport as an OpenTelemetry bridge so {@code logger.notOtel()} can route around
+     * it. {@link OtelTransport} already reports {@code true}.
+     */
+    default boolean isOtel() {
+      return false;
+    }
   }
 
   /** Application-owned OTEL sink. No global provider or instrumentation is installed. */
@@ -84,6 +92,11 @@ public final class NextLoggers {
 
     public OtelTransport(Consumer<Map<String, Object>> sink) {
       this.sink = Objects.requireNonNull(sink, "sink");
+    }
+
+    @Override
+    public boolean isOtel() {
+      return true;
     }
 
     @Override
@@ -129,6 +142,7 @@ public final class NextLoggers {
     private final String runtime;
     private final Map<String, Object> fields;
     private final List<Transport> transports;
+    private final boolean otel;
 
     public Logger(
         String appName,
@@ -136,15 +150,50 @@ public final class NextLoggers {
         String runtime,
         Map<String, Object> fields,
         List<Transport> transports) {
+      this(appName, name, runtime, fields, transports, true);
+    }
+
+    public Logger(
+        String appName,
+        String name,
+        String runtime,
+        Map<String, Object> fields,
+        List<Transport> transports,
+        boolean otel) {
       this.appName = requireText(appName, "appName");
       this.name = name;
       this.runtime = runtime == null || runtime.isBlank() ? "java" : runtime;
       this.fields = immutableCopy(fields);
       this.transports = transports == null ? List.of() : List.copyOf(transports);
+      this.otel = otel;
     }
 
     public Logger(String appName, List<Transport> transports) {
       this(appName, null, "java", Map.of(), transports);
+    }
+
+    /** Derived logger that delivers every record to OTEL transports (the default). */
+    public Logger useOtel() {
+      return withOtel(true);
+    }
+
+    /**
+     * Derived logger that keeps records off OTEL transports; every other transport still receives
+     * them. Java level methods take the fields map positionally, so routing is chosen on the logger:
+     * {@code logger.notOtel().warn("message", fields)}.
+     */
+    public Logger notOtel() {
+      return withOtel(false);
+    }
+
+    public Logger withOtel(boolean enabled) {
+      return enabled == otel
+          ? this
+          : new Logger(appName, name, runtime, fields, transports, enabled);
+    }
+
+    public boolean otelEnabled() {
+      return otel;
     }
 
     public Map<String, Object> log(Level level, String message, Map<String, Object> eventFields)
@@ -184,6 +233,9 @@ public final class NextLoggers {
       }
       Map<String, Object> immutable = Collections.unmodifiableMap(record);
       for (Transport transport : transports) {
+        if (!otel && transport.isOtel()) {
+          continue;
+        }
         transport.write(immutable);
       }
       return immutable;
@@ -191,6 +243,10 @@ public final class NextLoggers {
 
     public Map<String, Object> info(String message, Map<String, Object> fields) throws Exception {
       return log(Level.INFO, message, fields);
+    }
+
+    public Map<String, Object> warn(String message, Map<String, Object> fields) throws Exception {
+      return log(Level.WARN, message, fields);
     }
 
     public Map<String, Object> error(String message, Map<String, Object> fields) throws Exception {

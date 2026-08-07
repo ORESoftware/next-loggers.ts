@@ -58,5 +58,24 @@ Future<void> main() async {
   assert(traces[0] == 'trace-a');
   assert(traces[1] == 'trace-b');
 
+  final routedOtel = <Map<String, Object?>>[];
+  final routedAll = <Map<String, Object?>>[];
+  final routed = Logger(
+    appName: 'checkout',
+    transports: <LogTransport>[
+      OpenTelemetryTransport(routedOtel.add),
+      SupabaseTransport(routedAll.add),
+    ],
+  );
+  await routed.info('default on');
+  await routed.warn('opted out', otel: false);
+  await routed.notOtel().error('logger opted out');
+  await routed.notOtel().info('call opted back in', otel: true);
+  assert(routedOtel.length == 2);
+  assert(routedOtel.first['body'] == 'default on');
+  assert(routedOtel.last['body'] == 'call opted back in');
+  assert(routedAll.length == 4);
+  assert(routed.otel, 'notOtel() must return a derived logger');
+
   print('Dart/Flutter next-loggers conformance passed');
 }

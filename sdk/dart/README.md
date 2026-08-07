@@ -14,3 +14,19 @@ final record = await withLogContext(
   () => logger.info('charged order', fields: const {'orderId': 'order-42'}),
 );
 ```
+
+## OpenTelemetry on or off, per call
+
+`OpenTelemetryTransport` implements `OtelBridgeTransport`, so a record can skip
+it without touching the OTEL SDK:
+
+```dart
+await logger.info('charged', otel: true);
+await logger.warn('noisy poll', otel: false);  // other transports still receive it
+await logger.notOtel().error('local only');    // derived logger
+```
+
+The `otel:` constructor argument sets the default; `useOtel()` / `notOtel()`
+return a derived logger. Delivery happens at the call, so there is no unsent
+event — but the call returns a `Future`, so enable the analyzer's
+`unawaited_futures` lint to catch one that is never awaited.

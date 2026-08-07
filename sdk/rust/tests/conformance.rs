@@ -153,3 +153,82 @@ fn explicit_opentelemetry_and_supabase_transports_work() {
     assert_eq!(supabase[0].schema, "next-loggers/v1");
     assert_eq!(supabase[0].message, "payment failed");
 }
+
+#[test]
+fn per_event_otel_routing_skips_only_otel_transports() {
+    let emitted: Arc<Mutex<Vec<OpenTelemetryLogRecord>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = emitted.clone();
+    let memory = Arc::new(MemoryTransport::default());
+    let mut options = Options::default();
+    options.app_name = "checkout".into();
+    options.console = false;
+    options.transports = vec![
+        Arc::new(OpenTelemetryTransport::new(move |record| {
+            sink.lock().expect("sink poisoned").push(record);
+            Ok(())
+        })) as Arc<dyn Transport>,
+        memory.clone() as Arc<dyn Transport>,
+    ];
+    let logger = Logger::new(options);
+
+    logger.info(vec![json!("default on")]).send().expect("sent");
+    logger
+        .warn(vec![json!("opted out")])
+        .not_otel()
+        .send()
+        .expect("sent");
+    logger
+        .error(vec![json!("opted in")])
+        .use_otel()
+        .send()
+        .expect("sent");
+
+    let bodies: Vec<String> = emitted
+        .lock()
+        .expect("sink poisoned")
+        .iter()
+        .map(|record| record.body.clone())
+        .collect();
+    assert_eq!(bodies, vec!["default on", "opted in"]);
+    assert_eq!(memory.records().len(), 3);
+
+    // otel: false makes OpenTelemetry opt-in per event.
+    let opted: Arc<Mutex<Vec<OpenTelemetryLogRecord>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = opted.clone();
+    let mut options = Options::default();
+    options.app_name = "checkout".into();
+    options.console = false;
+    options.otel = false;
+    options.transports = vec![Arc::new(OpenTelemetryTransport::new(move |record| {
+        sink.lock().expect("sink poisoned").push(record);
+        Ok(())
+    })) as Arc<dyn Transport>];
+    let logger = Logger::new(options);
+
+    logger.info(vec![json!("skipped")]).send().expect("sent");
+    assert!(opted.lock().expect("sink poisoned").is_empty());
+    logger
+        .info(vec![json!("selected")])
+        .use_otel()
+        .send()
+        .expect("sent");
+    logger
+        .info(vec![json!("reset")])
+        .use_otel()
+        .reset_otel()
+        .send()
+        .expect("sent");
+    logger.use_otel();
+    logger
+        .info(vec![json!("default flipped")])
+        .send()
+        .expect("sent");
+
+    let bodies: Vec<String> = opted
+        .lock()
+        .expect("sink poisoned")
+        .iter()
+        .map(|record| record.body.clone())
+        .collect();
+    assert_eq!(bodies, vec!["selected", "default flipped"]);
+}

@@ -87,6 +87,12 @@ pub struct OtelLogRecord {
 
 pub trait Transport: Send + Sync {
     fn write(&self, record: &LogRecord) -> Result<(), String>;
+
+    /// Marks this transport as an OpenTelemetry bridge so `not_otel()` and
+    /// per-call routing can skip it.
+    fn is_otel(&self) -> bool {
+        false
+    }
 }
 
 pub struct OpenTelemetryTransport<F>
@@ -109,6 +115,10 @@ impl<F> Transport for OpenTelemetryTransport<F>
 where
     F: Fn(OtelLogRecord) -> Result<(), String> + Send + Sync,
 {
+    fn is_otel(&self) -> bool {
+        true
+    }
+
     fn write(&self, record: &LogRecord) -> Result<(), String> {
         let mut attributes = BTreeMap::from([
             ("service.name".to_string(), record.app_name.clone()),
@@ -163,6 +173,7 @@ pub struct Logger {
     runtime: String,
     fields: BTreeMap<String, String>,
     transports: Vec<Arc<dyn Transport>>,
+    otel: bool,
     id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
@@ -179,6 +190,7 @@ impl Logger {
             runtime: "wasm".to_string(),
             fields: BTreeMap::new(),
             transports: Vec::new(),
+            otel: true,
             id_factory: Arc::new(default_id),
             // WASM hosts should inject an RFC3339 clock. This deterministic
             // fallback is safe on targets without wall-clock capabilities.
@@ -199,6 +211,26 @@ impl Logger {
     pub fn with_transport<T: Transport + 'static>(mut self, transport: Arc<T>) -> Self {
         self.transports.push(transport);
         self
+    }
+
+    /// Sends every record to OTEL transports (the default).
+    pub fn use_otel(self) -> Self {
+        self.with_otel(true)
+    }
+
+    /// Makes OpenTelemetry opt-in: only `log_with(.., Some(true))` calls reach
+    /// OTEL transports.
+    pub fn not_otel(self) -> Self {
+        self.with_otel(false)
+    }
+
+    pub fn with_otel(mut self, enabled: bool) -> Self {
+        self.otel = enabled;
+        self
+    }
+
+    pub fn otel_enabled(&self) -> bool {
+        self.otel
     }
 
     pub fn with_id_factory<F>(mut self, factory: F) -> Self
@@ -223,6 +255,21 @@ impl Logger {
         message: impl Into<String>,
         context: Option<&LogContext>,
         event_fields: BTreeMap<String, String>,
+    ) -> Result<LogRecord, String> {
+        self.log_with(level, message, context, event_fields, None)
+    }
+
+    /// `otel` overrides this call's OTEL routing: `Some(true)` forces delivery
+    /// to OTEL transports, `Some(false)` skips them, `None` follows the logger
+    /// default. This core delivers at the call site, so there is no deferred
+    /// event to forget to send.
+    pub fn log_with(
+        &self,
+        level: LogLevel,
+        message: impl Into<String>,
+        context: Option<&LogContext>,
+        event_fields: BTreeMap<String, String>,
+        otel: Option<bool>,
     ) -> Result<LogRecord, String> {
         let message = message.into();
         let mut fields = self.fields.clone();
@@ -260,7 +307,11 @@ impl Logger {
             trace_ids,
             tags,
         };
+        let include_otel = otel.unwrap_or(self.otel);
         for transport in &self.transports {
+            if !include_otel && transport.is_otel() {
+                continue;
+            }
             transport.write(&record)?;
         }
         Ok(record)

@@ -176,3 +176,72 @@ func TestExplicitOpenTelemetryAndSupabaseTransports(t *testing.T) {
 		t.Fatalf("unexpected Supabase record: %#v", supabase[0])
 	}
 }
+
+func TestPerEventOtelRouting(t *testing.T) {
+	var otel []OpenTelemetryLogRecord
+	memory := &MemoryTransport{}
+	logger := NewLogger(Options{
+		AppName: "checkout",
+		Transports: []Transport{
+			NewOpenTelemetryTransport(func(record OpenTelemetryLogRecord) error {
+				otel = append(otel, record)
+				return nil
+			}),
+			memory,
+		},
+		Console: false,
+	})
+
+	if err := logger.Info("default on").Send(); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Warn("opted out").NotOtel().Send(); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Error("opted in").UseOtel().Send(); err != nil {
+		t.Fatal(err)
+	}
+	if len(otel) != 2 || otel[0].Body != "default on" || otel[1].Body != "opted in" {
+		t.Fatalf("unexpected OTEL deliveries: %#v", otel)
+	}
+	if len(memory.Records) != 3 {
+		t.Fatalf("non-OTEL transports must receive every record, got %d", len(memory.Records))
+	}
+
+	disabled := false
+	optIn := NewLogger(Options{
+		AppName: "checkout",
+		Otel:    &disabled,
+		Transports: []Transport{NewOpenTelemetryTransport(func(record OpenTelemetryLogRecord) error {
+			otel = append(otel, record)
+			return nil
+		})},
+		Console: false,
+	})
+	before := len(otel)
+	if err := optIn.Info("skipped").Send(); err != nil {
+		t.Fatal(err)
+	}
+	if len(otel) != before {
+		t.Fatalf("otel:false must make OpenTelemetry opt-in, got %#v", otel[before:])
+	}
+	if err := optIn.Info("selected").UseOtel().Send(); err != nil {
+		t.Fatal(err)
+	}
+	if len(otel) != before+1 || otel[before].Body != "selected" {
+		t.Fatalf("UseOtel must override the logger default: %#v", otel[before:])
+	}
+	optIn.UseOtel()
+	if err := optIn.Info("default flipped").Send(); err != nil {
+		t.Fatal(err)
+	}
+	if len(otel) != before+2 {
+		t.Fatalf("logger.UseOtel must flip the default: %#v", otel[before:])
+	}
+	if err := optIn.Info("reset follows default").UseOtel().ResetOtel().Send(); err != nil {
+		t.Fatal(err)
+	}
+	if len(otel) != before+3 {
+		t.Fatalf("ResetOtel must fall back to the logger default: %#v", otel[before:])
+	}
+}

@@ -57,4 +57,24 @@ class NextLoggersTest < Minitest::Test
 
     assert_equal %w[trace-a trace-b], [traces.pop, traces.pop].sort
   end
+  def test_not_otel_routes_around_the_otel_transport
+    otel = []
+    supabase = []
+    logger = ORESoftware::NextLoggers::Logger.new(
+      app_name: "payments",
+      transports: [
+        ORESoftware::NextLoggers::OtelTransport.new { |record| otel << record },
+        ORESoftware::NextLoggers::SupabaseTransport.new { |record| supabase << record }
+      ]
+    )
+
+    logger.info("default on")
+    logger.not_otel.warn("opted out")
+    logger.not_otel.use_otel.error("opted back in")
+
+    assert_equal ["default on", "opted back in"], otel.map { |record| record["body"] }
+    assert_equal 3, supabase.length
+    assert_equal true, logger.otel, "not_otel must return a derived logger, not mutate this one"
+  end
+
 end

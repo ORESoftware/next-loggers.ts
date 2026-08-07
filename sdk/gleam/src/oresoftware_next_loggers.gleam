@@ -59,6 +59,8 @@ pub type Transport {
     flush: fn() -> Result(Nil, String),
     flush_on_exit: fn(List(LogRecord)) -> Result(Nil, String),
     close: fn() -> Result(Nil, String),
+    /// True for OpenTelemetry bridges, so `not_otel` events can skip delivery.
+    is_otel: Bool,
   )
 }
 
@@ -71,6 +73,8 @@ pub type Options {
     fields: JsonObject,
     id_generator: fn() -> String,
     clock: fn() -> String,
+    /// Default routing for an OTEL transport when an event makes no choice.
+    otel: Bool,
   )
 }
 
@@ -79,7 +83,12 @@ pub opaque type Logger {
 }
 
 pub opaque type LogEvent {
-  LogEvent(subject: Subject(Message), record: LogRecord, sent: Bool)
+  LogEvent(
+    subject: Subject(Message),
+    record: LogRecord,
+    sent: Bool,
+    otel: Option(Bool),
+  )
 }
 
 type State {
@@ -88,13 +97,14 @@ type State {
     pending: List(LogRecord),
     closed: Bool,
     minimum_level: Level,
+    otel: Bool,
   )
 }
 
 type Message {
   Track(LogRecord)
   Update(LogRecord)
-  Send(LogRecord, Bool, Subject(Result(Bool, String)))
+  Send(LogRecord, Bool, Option(Bool), Subject(Result(Bool, String)))
   Flush(Subject(Result(Nil, String)))
   FlushOnExit(Subject(Result(Nil, String)))
   Close(Subject(Result(Nil, String)))
@@ -114,6 +124,7 @@ pub fn options(
     fields: [],
     id_generator:,
     clock:,
+    otel: True,
   )
 }
 
@@ -123,6 +134,7 @@ pub fn noop_transport() -> Transport {
     flush: fn() { Ok(Nil) },
     flush_on_exit: fn(_) { Ok(Nil) },
     close: fn() { Ok(Nil) },
+    is_otel: False,
   )
 }
 
@@ -136,6 +148,7 @@ pub fn otel_transport(
     flush: fn() { Ok(Nil) },
     flush_on_exit: fn(_) { Ok(Nil) },
     close: fn() { Ok(Nil) },
+    is_otel: True,
   )
 }
 
@@ -148,6 +161,7 @@ pub fn supabase_transport(
     flush: fn() { Ok(Nil) },
     flush_on_exit: fn(_) { Ok(Nil) },
     close: fn() { Ok(Nil) },
+    is_otel: False,
   )
 }
 
@@ -176,6 +190,7 @@ pub fn new(options options: Options, transport transport: Transport) -> Logger {
       pending: [],
       closed: False,
       minimum_level: options.minimum_level,
+      otel: options.otel,
     ))
     |> actor.on_message(handle_message)
     |> actor.start
@@ -240,108 +255,87 @@ fn event(
       stack_trace: [],
     )
   actor.send(subject, Track(record))
-  LogEvent(subject:, record:, sent: False)
+  LogEvent(subject:, record:, sent: False, otel: None)
+}
+
+/// Force this record onto an OTEL transport, even when the logger opts out.
+pub fn use_otel(event: LogEvent) -> LogEvent {
+  with_otel(event, True)
+}
+
+/// Keep this record off an OTEL transport; any other transport still gets it.
+pub fn not_otel(event: LogEvent) -> LogEvent {
+  with_otel(event, False)
+}
+
+pub fn with_otel(event: LogEvent, enabled: Bool) -> LogEvent {
+  LogEvent(..event, otel: Some(enabled))
+}
+
+/// Drop the per-event choice so the logger default decides again.
+pub fn reset_otel(event: LogEvent) -> LogEvent {
+  LogEvent(..event, otel: None)
 }
 
 pub fn add_fields(event: LogEvent, fields: JsonObject) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, fields: list.append(record.fields, fields)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, fields: list.append(record.fields, fields))))
 }
 
 pub fn add_user(event: LogEvent, user: JsonObject) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, users: list.append(record.users, [user])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, users: list.append(record.users, [user]))))
 }
 
 pub fn set_logged_in_user(event: LogEvent, user: JsonObject) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, logged_in_user: Some(user)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, logged_in_user: Some(user))))
 }
 
 pub fn add_trace(event: LogEvent, trace_id: String) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
+  let LogEvent(record:, ..) = event
   let first_trace = case record.trace_id {
     Some(value) -> Some(value)
     None -> Some(trace_id)
   }
-  update(LogEvent(
-    subject:,
-    record: LogRecord(
+  update(LogEvent(..event, record: LogRecord(
       ..record,
       trace_id: first_trace,
       trace_ids: list.append(record.trace_ids, [trace_id]),
-    ),
-    sent:,
-  ))
+    )))
 }
 
 pub fn add_routine_id(event: LogEvent, routine_id: String) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, routine_id: Some(routine_id)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, routine_id: Some(routine_id))))
 }
 
 pub fn add_tags(event: LogEvent, tags: List(String)) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, tags: list.append(record.tags, tags)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, tags: list.append(record.tags, tags))))
 }
 
 pub fn add_context(event: LogEvent, value: Json) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, context: list.append(record.context, [value])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, context: list.append(record.context, [value]))))
 }
 
 pub fn add_meta(event: LogEvent, value: Json) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, meta: list.append(record.meta, [value])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, meta: list.append(record.meta, [value]))))
 }
 
 pub fn add_error(event: LogEvent, value: Json) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, errors: list.append(record.errors, [value])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(..record, errors: list.append(record.errors, [value]))))
 }
 
 pub fn capture_stack_trace(event: LogEvent, stack_trace: String) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(
+  let LogEvent(record:, ..) = event
+  update(LogEvent(..event, record: LogRecord(
       ..record,
       stack_trace: list.append(record.stack_trace, [stack_trace]),
-    ),
-    sent:,
-  ))
+    )))
 }
 
 fn update(event: LogEvent) -> LogEvent {
@@ -358,12 +352,12 @@ pub fn send_with_store(
   event: LogEvent,
   store: Bool,
 ) -> Result(LogEvent, String) {
-  let LogEvent(subject:, record:, sent:) = event
+  let LogEvent(subject:, record:, sent:, otel:) = event
   case sent {
     True -> Ok(event)
     False -> {
-      case actor.call(subject, 5000, Send(record, store, _)) {
-        Ok(was_sent) -> Ok(LogEvent(subject:, record:, sent: was_sent))
+      case actor.call(subject, 5000, Send(record, store, otel, _)) {
+        Ok(was_sent) -> Ok(LogEvent(..event, sent: was_sent))
         Error(reason) -> Error(reason)
       }
     }
@@ -465,13 +459,13 @@ fn handle_message(
   state: State,
   message: Message,
 ) -> actor.Next(State, Message) {
-  let State(transport:, pending:, closed:, minimum_level:) = state
+  let State(transport:, pending:, closed:, minimum_level:, ..) = state
   case message {
     Track(record) ->
       actor.continue(State(..state, pending: [record, ..pending]))
     Update(record) ->
       actor.continue(State(..state, pending: replace_record(pending, record)))
-    Send(record, store, reply) -> {
+    Send(record, store, otel, reply) -> {
       case closed {
         True -> {
           process.send(reply, Error("logger is closed"))
@@ -479,7 +473,11 @@ fn handle_message(
         }
         False -> {
           let enabled = level_rank(record.level) >= level_rank(minimum_level)
-          case store && enabled {
+          let deliver = case transport.is_otel {
+            True -> option.unwrap(otel, state.otel)
+            False -> True
+          }
+          case store && enabled && deliver {
             False -> {
               process.send(reply, Ok(True))
               actor.continue(
