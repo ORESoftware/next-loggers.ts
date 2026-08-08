@@ -25,11 +25,8 @@ pub trait Span: Send + Sync {
 }
 
 pub trait Tracer: Send + Sync {
-    fn start_span(
-        &self,
-        name: &str,
-        attributes: &JsonObject,
-    ) -> Result<Arc<dyn Span>, LoggerError>;
+    fn start_span(&self, name: &str, attributes: &JsonObject)
+        -> Result<Arc<dyn Span>, LoggerError>;
 }
 
 struct NoopSpan;
@@ -154,7 +151,7 @@ fn safe_recording(logger: &Logger, context: &LogContext, name: &str, span: &dyn 
             false
         }
         Err(payload) => {
-            bridge_warn(
+            bridge_warn((
                 logger,
                 context,
                 "is recording",
@@ -175,13 +172,7 @@ fn start_span(
     match catch_unwind(AssertUnwindSafe(|| tracer.start_span(name, attributes))) {
         Ok(Ok(span)) => span,
         Ok(Err(error)) => {
-            bridge_warn(
-                logger,
-                &LogContext::default(),
-                "start span",
-                name,
-                &error,
-            );
+            bridge_warn(logger, &LogContext::default(), "start span", name, &error);
             Arc::new(NoopSpan)
         }
         Err(payload) => {
@@ -232,24 +223,23 @@ struct SpanEndGuard {
 
 impl Drop for SpanEndGuard {
     fn drop(&mut self) {
-        safe_span_call(
-            &self.logger,
-            &self.context,
-            "end span",
-            &self.name,
-            || self.span.end(),
-        );
+        safe_span_call(&self.logger, &self.context, "end span", &self.name, || {
+            self.span.end()
+        });
     }
 }
 
 fn record_start(logger: &Logger, context: &LogContext, name: &str, span: &dyn Span) {
     let fields = JsonObject::from_iter([
         ("otel.span_name".into(), Value::String(name.into())),
-        ("otel.span_phase".into(), Value::String("start".into())),
+        ("otel.span_phase".into(), Value::String("start".into()),
     ]);
     bridge_send(context, || {
         logger
-            .debug(vec![Value::String("span started".into()), Value::String(name.into())])
+            .debug(vec![
+                Value::String("span started".into()),
+                Value::String(name.into()),
+            ])
             .add_fields(fields.clone())
             .add_tags(["otel-span"])
     });
@@ -302,7 +292,10 @@ fn record_error<E: Error + Send + Sync + 'static>(
             span.set_status(OTEL_STATUS_ERROR, &error.to_string())
         });
         safe_span_call(logger, context, "record error event", name, || {
-            span.add_event("ores.otel.log.error", &bridge_fields("error", name, started))
+            span.add_event(
+                "ores.otel.log.error",
+                &bridge_fields("error", name, started),
+            )
         });
     }
     bridge_send(context, || {

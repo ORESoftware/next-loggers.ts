@@ -57,7 +57,10 @@ fn nested_context_merges_applies_and_restores_after_panic() {
                 apply_log_context(logger.info(vec![json!("inside")]), &current_log_context())
                     .send()
                     .unwrap();
-                assert_eq!(current_log_context().trace_id.as_deref(), Some("trace-inner"));
+                assert_eq!(
+                    current_log_context().trace_id.as_deref(),
+                    Some("trace-inner")
+                );
                 panic!("restore me");
             });
         });
@@ -72,7 +75,10 @@ fn nested_context_merges_applies_and_restores_after_panic() {
     assert_eq!(record.fields["otel.span_id"], json!("span-1"));
     assert_eq!(record.fields["request"], json!("inner"));
     assert_eq!(record.fields["keep"], json!(true));
-    assert_eq!(record.logged_in_user.as_ref().unwrap()["role"], json!("admin"));
+    assert_eq!(
+        record.logged_in_user.as_ref().unwrap()["role"],
+        json!("admin")
+    );
     assert_eq!(record.users.len(), 2);
     assert_eq!(record.routine_id.as_deref(), Some("checkout"));
     assert_eq!(record.tags, vec!["otel", "outer", "inner"]);

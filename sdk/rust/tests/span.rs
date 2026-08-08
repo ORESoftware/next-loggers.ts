@@ -57,7 +57,11 @@ impl Span for FakeSpan {
 
 struct FakeTracer(FakeSpan);
 impl Tracer for FakeTracer {
-    fn start_span(&self, _name: &str, _attributes: &JsonObject) -> Result<Arc<dyn Span>, LoggerError> {
+    fn start_span(
+        &self,
+        _name: &str,
+        _attributes: &JsonObject,
+    ) -> Result<Arc<dyn Span>, LoggerError> {
         Ok(Arc::new(self.0.clone()))
     }
 }
@@ -97,14 +101,11 @@ fn sampled_out_span_keeps_correlation_without_mutation() {
     let (logger, transport) = logger();
     let (span, state) = fake_span(false);
     let tracer = FakeTracer(span);
-    let value = with_span::<_, TestError, _>(
-        &logger,
-        &tracer,
-        "sampled-out",
-        JsonObject::new(),
-        |_| Ok(current_log_context().trace_id.unwrap()),
-    )
-    .unwrap();
+    let value =
+        with_span::<_, TestError, _>(&logger, &tracer, "sampled-out", JsonObject::new(), |_| {
+            Ok(current_log_context().trace_id.unwrap())
+        })
+        .unwrap();
     assert_eq!(value, "0123456789abcdef0123456789abcdef");
     let state = state.lock().unwrap();
     assert_eq!(state.status, None);
@@ -129,19 +130,18 @@ fn recording_span_records_error_and_preserves_identity() {
     let (logger, _) = logger();
     let (span, state) = fake_span(true);
     let tracer = FakeTracer(span);
-    let result = with_span(
-        &logger,
-        &tracer,
-        "failure",
-        JsonObject::new(),
-        |_| Err::<(), _>(TestError("boom")),
-    );
+    let result = with_span(&logger, &tracer, "failure", JsonObject::new(), |_| {
+        Err::<(), _>(TestError("boom"))
+    });
     assert_eq!(result.unwrap_err().0, "boom");
     let state = state.lock().unwrap();
     assert_eq!(state.status, Some((OTEL_STATUS_ERROR, "boom".into())));
     assert_eq!(state.errors, vec!["boom"]);
     assert_eq!(state.ended, 1);
-    assert_eq!(state.events, vec!["ores.otel.log.start", "ores.otel.log.error"]);
+    assert_eq!(
+        state.events,
+        vec!["ores.otel.log.start", "ores.otel.log.error"]
+    );
 }
 
 struct NoopWake;
