@@ -1,6 +1,6 @@
 //! Explicit adapters around application-owned OpenTelemetry spans.
 
-use crate::context::{apply_log_context, with_log_context_async, LogContext};
+use crate::context::{apply_log_context, enter_log_context, with_log_context_async, LogContext};
 use crate::{JsonObject, Logger, LoggerError, Value};
 use std::any::Any;
 use std::error::Error;
@@ -13,6 +13,7 @@ use std::time::Instant;
 pub const OTEL_STATUS_OK: u8 = 1;
 pub const OTEL_STATUS_ERROR: u8 = 2;
 
+/// Structural adapter implemented around an application-owned OTEL span.
 pub trait Span: Send + Sync {
     fn log_context(&self) -> Result<LogContext, LoggerError>;
     fn is_recording(&self) -> Result<bool, LoggerError>;
@@ -24,9 +25,13 @@ pub trait Span: Send + Sync {
     fn end(&self) -> Result<(), LoggerError>;
 }
 
+/// Structural adapter implemented around an application-owned OTEL tracer.
 pub trait Tracer: Send + Sync {
-    fn start_span(&self, name: &str, attributes: &JsonObject)
-        -> Result<Arc<dyn Span>, LoggerError>;
+    fn start_span(
+        &self,
+        name: &str,
+        attributes: &JsonObject,
+    ) -> Result<Arc<dyn Span>, LoggerError>;
 }
 
 struct NoopSpan;
@@ -70,30 +75,33 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
     } else if let Some(message) = payload.downcast_ref::<String>() {
         message.clone()
     } else {
-        "non-string panic payload".into()
+        "non-string panic payload".to_string()
     }
 }
 
-fn bridge_send(context: &LogContext, build: impl FnOnce() -> crate::Event) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        let _ = apply_log_context(build(), context).send();
-    }));
-}
-
-fn bridge_fields(operation: &str, name: &str, started: Instant) -> JsonObject {
+fn fields(operation: &str, name: &str, started: Instant) -> JsonObject {
     JsonObject::from_iter([
         (
-            "otel.bridge_operation".into(),
-            Value::String(operation.into()),
+            "otel.bridge_operation".to_string(),
+            Value::String(operation.to_string()),
         ),
-        ("otel.span_name".into(), Value::String(name.into())),
         (
-            "otel.duration_ms".into(),
+            "otel.span_name".to_string(),
+            Value::String(name.to_string()),
+        ),
+        (
+            "otel.duration_ms".to_string(),
             serde_json::Number::from_f64(started.elapsed().as_secs_f64() * 1_000.0)
                 .map(Value::Number)
                 .unwrap_or(Value::Null),
         ),
     ])
+}
+
+fn send_bridge(event: crate::Event, context: &LogContext) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let _ = apply_log_context(event, context).send();
+    }));
 }
 
 fn bridge_warn(
@@ -103,24 +111,26 @@ fn bridge_warn(
     name: &str,
     error: &LoggerError,
 ) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        bridge_send(context, || {
-            logger
-                .warn(vec![
-                    Value::String("OpenTelemetry bridge operation failed".into()),
-                    Value::String(operation.into()),
-                    Value::String(error.to_string()),
-                ])
-                .add_fields(JsonObject::from_iter([
-                    (
-                        "otel.bridge_operation".into(),
-                        Value::String(operation.into()),
-                    ),
-                    ("otel.span_name".into(), Value::String(name.into())),
-                ]))
-                .add_tags(["otel-span", "otel-bridge-error"])
-        });
-    }));
+    send_bridge(
+        logger
+            .warn(vec![
+                Value::String("OpenTelemetry bridge operation failed".to_string()),
+                Value::String(operation.to_string()),
+                Value::String(error.to_string()),
+            ])
+            .add_fields(JsonObject::from_iter([
+                (
+                    "otel.bridge_operation".to_string(),
+                    Value::String(operation.to_string()),
+                ),
+                (
+                    "otel.span_name".to_string(),
+                    Value::String(name.to_string()),
+                ),
+            ]))
+            .add_tags(["otel-span", "otel-bridge-error"]),
+        context,
+    );
 }
 
 fn safe_span_call(
@@ -143,7 +153,7 @@ fn safe_span_call(
     }
 }
 
-fn safe_recording(logger: &Logger, context: &LogContext, name: &str, span: &dyn Span) -> bool {
+fn recording(logger: &Logger, context: &LogContext, name: &str, span: &dyn Span) -> bool {
     match catch_unwind(AssertUnwindSafe(|| span.is_recording())) {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
@@ -151,7 +161,7 @@ fn safe_recording(logger: &Logger, context: &LogContext, name: &str, span: &dyn 
             false
         }
         Err(payload) => {
-            bridge_warn((
+            bridge_warn(
                 logger,
                 context,
                 "is recording",
@@ -223,29 +233,40 @@ struct SpanEndGuard {
 
 impl Drop for SpanEndGuard {
     fn drop(&mut self) {
-        safe_span_call(&self.logger, &self.context, "end span", &self.name, || {
-            self.span.end()
-        });
+        safe_span_call(
+            &self.logger,
+            &self.context,
+            "end span",
+            &self.name,
+            || self.span.end(),
+        );
     }
 }
 
 fn record_start(logger: &Logger, context: &LogContext, name: &str, span: &dyn Span) {
-    let fields = JsonObject::from_iter([
-        ("otel.span_name".into(), Value::String(name.into())),
-        ("otel.span_phase".into(), Value::String("start".into()),
+    let attributes = JsonObject::from_iter([
+        (
+            "otel.span_name".to_string(),
+            Value::String(name.to_string()),
+        ),
+        (
+            "otel.span_phase".to_string(),
+            Value::String("start".to_string()),
+        ),
     ]);
-    bridge_send(context, || {
+    send_bridge(
         logger
             .debug(vec![
-                Value::String("span started".into()),
-                Value::String(name.into()),
+                Value::String("span started".to_string()),
+                Value::String(name.to_string()),
             ])
-            .add_fields(fields.clone())
-            .add_tags(["otel-span"])
-    });
-    if safe_recording(logger, context, name, span) {
+            .add_fields(attributes.clone())
+            .add_tags(["otel-span"]),
+        context,
+    );
+    if recording(logger, context, name, span) {
         safe_span_call(logger, context, "record start event", name, || {
-            span.add_event("ores.otel.log.start", &fields)
+            span.add_event("ores.otel.log.start", &attributes)
         });
     }
 }
@@ -257,26 +278,27 @@ fn record_success(
     span: &dyn Span,
     started: Instant,
 ) {
-    if safe_recording(logger, context, name, span) {
+    if recording(logger, context, name, span) {
         safe_span_call(logger, context, "set success status", name, || {
             span.set_status(OTEL_STATUS_OK, "")
         });
         safe_span_call(logger, context, "record end event", name, || {
-            span.add_event("ores.otel.log.end", &bridge_fields("end", name, started))
+            span.add_event("ores.otel.log.end", &fields("end", name, started))
         });
     }
-    bridge_send(context, || {
+    send_bridge(
         logger
             .debug(vec![
-                Value::String("span completed".into()),
-                Value::String(name.into()),
+                Value::String("span completed".to_string()),
+                Value::String(name.to_string()),
             ])
-            .add_fields(bridge_fields("end", name, started))
-            .add_tags(["otel-span"])
-    });
+            .add_fields(fields("end", name, started))
+            .add_tags(["otel-span"]),
+        context,
+    );
 }
 
-fn record_error<E: Error + Send + Sync + 'static>(
+fn record_failure<E: Error + Send + Sync + 'static>(
     logger: &Logger,
     context: &LogContext,
     name: &str,
@@ -284,7 +306,7 @@ fn record_error<E: Error + Send + Sync + 'static>(
     error: &E,
     started: Instant,
 ) {
-    if safe_recording(logger, context, name, span) {
+    if recording(logger, context, name, span) {
         safe_span_call(logger, context, "record exception", name, || {
             span.record_error(error)
         });
@@ -292,24 +314,23 @@ fn record_error<E: Error + Send + Sync + 'static>(
             span.set_status(OTEL_STATUS_ERROR, &error.to_string())
         });
         safe_span_call(logger, context, "record error event", name, || {
-            span.add_event(
-                "ores.otel.log.error",
-                &bridge_fields("error", name, started),
-            )
+            span.add_event("ores.otel.log.error", &fields("error", name, started))
         });
     }
-    bridge_send(context, || {
+    send_bridge(
         logger
             .error(vec![
-                Value::String("span failed".into()),
-                Value::String(name.into()),
+                Value::String("span failed".to_string()),
+                Value::String(name.to_string()),
                 Value::String(error.to_string()),
             ])
-            .add_fields(bridge_fields("error", name, started))
-            .add_tags(["otel-span"])
-    });
+            .add_fields(fields("error", name, started))
+            .add_tags(["otel-span"]),
+        context,
+    );
 }
 
+/// Run a synchronous callback inside one explicit application-owned span.
 pub fn with_span<T, E, F>(
     logger: &Logger,
     tracer: &dyn Tracer,
@@ -323,12 +344,12 @@ where
 {
     let span = start_span(logger, tracer, name, &attributes);
     let context = span_context(logger, name, span.as_ref());
-    let _scope = crate::context::enter_log_context(context.clone());
+    let _scope = enter_log_context(context.clone());
     let _end = SpanEndGuard {
         logger: logger.clone(),
         span: span.clone(),
         context: context.clone(),
-        name: name.into(),
+        name: name.to_string(),
     };
     let started = Instant::now();
     record_start(logger, &context, name, span.as_ref());
@@ -339,17 +360,19 @@ where
             Ok(value)
         }
         Ok(Err(error)) => {
-            record_error(logger, &context, name, span.as_ref(), &error, started);
+            record_failure(logger, &context, name, span.as_ref(), &error, started);
             Err(error)
         }
         Err(payload) => {
             let error = PanicError(format!("panic: {}", panic_message(payload.as_ref())));
-            record_error(logger, &context, name, span.as_ref(), &error, started);
+            record_failure(logger, &context, name, span.as_ref(), &error, started);
             resume_unwind(payload)
         }
     }
 }
 
+/// Run an async callback inside one explicit span. The context is installed for
+/// every future poll, and dropping the returned future ends the span.
 pub async fn with_span_async<T, E, F, Fut>(
     logger: &Logger,
     tracer: &dyn Tracer,
@@ -368,19 +391,18 @@ where
         logger: logger.clone(),
         span: span.clone(),
         context: context.clone(),
-        name: name.into(),
+        name: name.to_string(),
     };
     let started = Instant::now();
     record_start(logger, &context, name, span.as_ref());
 
-    let result = with_log_context_async(context.clone(), callback(span.clone())).await;
-    match result {
+    match with_log_context_async(context.clone(), callback(span.clone())).await {
         Ok(value) => {
             record_success(logger, &context, name, span.as_ref(), started);
             Ok(value)
         }
         Err(error) => {
-            record_error(logger, &context, name, span.as_ref(), &error, started);
+            record_failure(logger, &context, name, span.as_ref(), &error, started);
             Err(error)
         }
     }
