@@ -11,6 +11,7 @@
   "files": [
     "dist",
     "src",
+    "contracts",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -113,6 +114,7 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
+    "./contracts/*": "./contracts/*",
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -120,12 +122,13 @@
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:contracts": "node scripts/validate-contracts.mjs",
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
-    "test:all": "npm test && npm run test:runtimes && npm run test:polyglot",
+    "test:all": "npm run test:contracts && npm test && npm run test:runtimes && npm run test:polyglot",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
-    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json --prefix sdk/nodejs",
-    "prepack": "npm test"
+    "release:check": "npm run test:contracts && npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json --prefix sdk/nodejs",
+    "prepack": "npm run test:contracts && npm test"
   },
   "engines": {
     "node": ">=18"
@@ -136,11 +139,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ORESoftware/next-loggers.ts.git"
+    "url": "git+https://github.com/ores-otel/ores.otel.log.git"
   },
-  "homepage": "https://github.com/ORESoftware/next-loggers.ts#readme",
+  "homepage": "https://github.com/ores-otel/ores.otel.log#readme",
   "bugs": {
-    "url": "https://github.com/ORESoftware/next-loggers.ts/issues"
+    "url": "https://github.com/ores-otel/ores.otel.log/issues"
   },
   "devDependencies": {
     "eslint": "^10.7.0",
