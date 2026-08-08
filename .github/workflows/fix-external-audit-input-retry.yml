@@ -1,0 +1,47 @@
+name: Retry external audit input expression fix
+
+on:
+  push:
+    branches:
+      - agent/polyglot-context-shutdown-20260808
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-external-audit-input-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch expression without embedding an Actions token
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/server-lifecycle-audit-external.yml')
+          text = path.read_text()
+          old = '$' + '{{ inputs.canonical-ref }}'
+          new = '$' + "{{ inputs['canonical-ref'] }}"
+          if old in text:
+              path.write_text(text.replace(old, new))
+          PY
+          rm -f .github/workflows/fix-external-audit-input.yml
+          rm -f .github/workflows/fix-external-audit-input-retry.yml
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No patch or cleanup required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(ci): access hyphenated reusable-workflow input safely"
+          git push origin HEAD:${GITHUB_REF_NAME}
