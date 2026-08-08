@@ -11,6 +11,7 @@
   "files": [
     "dist",
     "src",
+    "contracts",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -97,6 +98,14 @@
       "types": "./dist/otel.d.ts",
       "default": "./dist/otel.js"
     },
+    "./prometheus": {
+      "types": "./dist/prometheus.d.ts",
+      "default": "./dist/prometheus.js"
+    },
+    "./supabase-ingest": {
+      "types": "./dist/supabase-ingest.d.ts",
+      "default": "./dist/supabase-ingest.js"
+    },
     "./config": {
       "types": "./dist/config.d.ts",
       "default": "./dist/config.js"
@@ -105,6 +114,11 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
+    "./contracts/log-record.schema.json": "./contracts/log-record.schema.json",
+    "./contracts/logger-api.schema.json": "./contracts/logger-api.schema.json",
+    "./contracts/logger-api.json": "./contracts/logger-api.json",
+    "./contracts/test-org-matrix.schema.json": "./contracts/test-org-matrix.schema.json",
+    "./contracts/test-org-matrix.json": "./contracts/test-org-matrix.json",
     "./package.json": "./package.json"
   },
   "engines": {
@@ -116,12 +130,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ORESoftware/next-loggers.ts.git",
+    "url": "git+https://github.com/ores-otel/ores.otel.log.git",
     "directory": "sdk/nodejs"
   },
-  "homepage": "https://github.com/ORESoftware/next-loggers.ts#readme",
+  "homepage": "https://github.com/ores-otel/ores.otel.log#readme",
   "bugs": {
-    "url": "https://github.com/ORESoftware/next-loggers.ts/issues"
+    "url": "https://github.com/ores-otel/ores.otel.log/issues"
   },
   "peerDependencies": {
     "eslint": ">=9 <11"
