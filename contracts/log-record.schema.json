@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ORESoftware/next-loggers.ts/contracts/log-record.schema.json",
-  "title": "next-loggers/v1 log record",
-  "description": "Canonical wire record shared by every next-loggers language SDK.",
+  "$id": "urn:ores:otel:log:record:v1",
+  "title": "ores.otel.log/v1 log record",
+  "description": "Canonical wire record shared by every ores.otel.log language SDK; the next-loggers/v1 discriminator remains stable during repository migration.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -118,27 +118,15 @@
   "$defs": {
     "jsonValue": {
       "oneOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "string"
-        },
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "number"},
+        {"type": "string"},
         {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/jsonValue"
-          }
+          "items": {"$ref": "#/$defs/jsonValue"}
         },
-        {
-          "$ref": "#/$defs/jsonObject"
-        }
+        {"$ref": "#/$defs/jsonObject"}
       ]
     },
     "jsonObject": {
