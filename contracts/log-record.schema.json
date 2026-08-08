@@ -118,15 +118,27 @@
   "$defs": {
     "jsonValue": {
       "oneOf": [
-        {"type": "null"},
-        {"type": "boolean"},
-        {"type": "number"},
-        {"type": "string"},
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
         {
           "type": "array",
-          "items": {"$ref": "#/$defs/jsonValue"}
+          "items": {
+            "$ref": "#/$defs/jsonValue"
+          }
         },
-        {"$ref": "#/$defs/jsonObject"}
+        {
+          "$ref": "#/$defs/jsonObject"
+        }
       ]
     },
     "jsonObject": {
