@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
       - name: Set up Node.js
-        uses: actions/setup-node@d7d83c3a3f57f7b7e5d6f7de6f7d1d6b5a65a20d # v7
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Validate schemas, operations, SDK bindings, and test-org pairs
