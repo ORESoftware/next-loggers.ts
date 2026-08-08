@@ -97,6 +97,14 @@
       "types": "./dist/otel.d.ts",
       "default": "./dist/otel.js"
     },
+    "./prometheus": {
+      "types": "./dist/prometheus.d.ts",
+      "default": "./dist/prometheus.js"
+    },
+    "./supabase-ingest": {
+      "types": "./dist/supabase-ingest.d.ts",
+      "default": "./dist/supabase-ingest.js"
+    },
     "./config": {
       "types": "./dist/config.d.ts",
       "default": "./dist/config.js"
