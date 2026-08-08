@@ -1,0 +1,142 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 8
+      http:
+        endpoint: 0.0.0.0:4318
+        max_request_body_size: 8388608
+        # Deliberately no CORS configuration. Browser and distributed clients
+        # use the authenticated Supabase transport instead of direct OTLP.
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+
+  resource/harden:
+    attributes:
+      - key: deployment.environment.name
+        value: ${env:DEPLOYMENT_ENVIRONMENT}
+        action: insert
+      - key: authorization
+        action: delete
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+      - key: http.response.header.set-cookie
+        action: delete
+      - key: db.connection_string
+        action: delete
+      - key: enduser.email
+        action: delete
+      - key: enduser.id
+        action: delete
+
+  attributes/redact:
+    actions:
+      - key: authorization
+        action: delete
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+      - key: http.response.header.set-cookie
+        action: delete
+      - key: db.connection_string
+        action: delete
+      - key: enduser.email
+        action: delete
+      - key: enduser.id
+        action: delete
+      - key: user.email
+        action: delete
+      - key: user.phone
+        action: delete
+
+  batch/logs:
+    timeout: 1s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+  batch/metrics:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+  batch/traces:
+    timeout: 1s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 5m
+    sending_queue:
+      enabled: true
+      sizer: items
+      queue_size: 10000
+      num_consumers: 4
+      block_on_overflow: false
+
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    compression: gzip
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 5m
+    sending_queue:
+      enabled: true
+      sizer: items
+      queue_size: 10000
+      num_consumers: 4
+      block_on_overflow: false
+
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    enable_open_metrics: true
+    send_timestamps: true
+    metric_expiration: 5m
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/harden, attributes/redact, batch/logs]
+      exporters: [otlphttp/loki]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/harden, attributes/redact, batch/metrics]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/harden, attributes/redact, batch/traces]
+      exporters: [otlp/tempo]
