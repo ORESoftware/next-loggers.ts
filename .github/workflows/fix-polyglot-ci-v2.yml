@@ -1,0 +1,97 @@
+name: Fix polyglot CI hardening v2
+
+on:
+  push:
+    branches:
+      - agent/polyglot-context-shutdown-20260808
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-polyglot-ci-hardening-v2
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Apply deterministic source fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          go_path = Path("sdk/go/context_test.go")
+          go_text = go_path.read_text()
+          old_go = "value != byte(0)"
+          if go_text.count(old_go) != 1:
+              raise SystemExit(f"expected exactly one Go assertion, found {go_text.count(old_go)}")
+          go_path.write_text(go_text.replace(old_go, "value != 0"))
+
+          dart_path = Path("sdk/dart/lib/next_loggers.dart")
+          lines = dart_path.read_text().splitlines()
+          output = []
+          flush_count = 0
+          exit_flush_count = 0
+          close_count = 0
+
+          for line in lines:
+              stripped = line.strip()
+              indent = line[: len(line) - len(line.lstrip())]
+              if stripped == "await transport.flush();":
+                  output.append(indent + "final flushable = transport as FlushableLogTransport;")
+                  output.append(indent + "await flushable.flush();")
+                  flush_count += 1
+              elif stripped == "await transport.flushOnExit(unsent);":
+                  output.append(indent + "final exitFlushable = transport as ExitFlushableLogTransport;")
+                  output.append(indent + "await exitFlushable.flushOnExit(unsent);")
+                  exit_flush_count += 1
+              elif stripped == "await transport.close();":
+                  output.append(indent + "final closable = transport as ClosableLogTransport;")
+                  output.append(indent + "await closable.close();")
+                  close_count += 1
+              else:
+                  output.append(line)
+
+          expected = (2, 1, 1)
+          actual = (flush_count, exit_flush_count, close_count)
+          if actual != expected:
+              raise SystemExit(f"unexpected Dart replacement counts: expected {expected}, got {actual}")
+
+          dart_path.write_text("\n".join(output) + "\n")
+          PY
+
+      - name: Install Rust formatter
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format Rust context SDK
+        run: cargo fmt --manifest-path sdk/rust-context/Cargo.toml
+
+      - name: Install Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Format Dart SDK
+        run: dart format sdk/dart/lib sdk/dart/test
+
+      - name: Commit deterministic repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/fix-polyglot-ci-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: satisfy polyglot context lifecycle gates"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
