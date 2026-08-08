@@ -50,16 +50,16 @@
     }
   },
   "context": {
-    "status": "partial",
+    "status": "implemented",
     "strategy": "thread-local-and-task-scope",
     "propagation": "thread",
     "isolation": "concurrent-safe",
     "symbols": {
-      "run": ["with_log_context"],
-      "current": ["current_log_context"],
-      "update": ["update_log_context"],
-      "apply": ["LogEvent::apply_context"],
-      "withSpan": ["with_span"]
+      "run": ["with_log_context", "with_log_context_async", "enter_log_context"],
+      "current": ["current_log_context", "capture_log_context"],
+      "update": ["update_log_context", "merge_log_context"],
+      "apply": ["apply_log_context", "apply_current_log_context"],
+      "withSpan": ["with_span", "with_span_async"]
     },
     "mergesLoggedInUser": true,
     "mergesFields": true,
@@ -68,14 +68,14 @@
   },
   "telemetry": {
     "opentelemetry": {
-      "adapterSymbols": ["OpenTelemetryTransport"],
+      "adapterSymbols": ["OpenTelemetryTransport", "with_span", "with_span_async"],
       "explicit": true,
       "automaticInstrumentation": false,
       "monkeyPatching": false,
       "ownsProvider": false,
       "wrapsLoggerCalls": true,
-      "sampledOutCorrelation": false,
-      "recordingSpanEventsOnly": false
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
     },
     "supabase": {
       "adapterSymbols": ["SupabaseTransport"],
@@ -88,16 +88,23 @@
   "conformance": {
     "command": "cargo test --manifest-path sdk/rust/Cargo.toml",
     "recordFixture": "contracts/fixtures/conformance-record.json",
-    "sourceFiles": ["sdk/rust/src/lib.rs", "sdk/rust/tests/conformance.rs"],
+    "sourceFiles": [
+      "sdk/rust/src/lib.rs",
+      "sdk/rust/src/core.rs",
+      "sdk/rust/src/context.rs",
+      "sdk/rust/src/span.rs",
+      "sdk/rust/tests/conformance.rs",
+      "sdk/rust/tests/context.rs",
+      "sdk/rust/tests/span.rs"
+    ],
     "validatesJsonSchema": false,
-    "testsContextIsolation": false,
-    "testsNoMonkeyPatching": false
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": true
   },
   "promotion": {
     "ready": false,
     "blockers": [
-      "Add scoped thread-local context with non-Send guards and unwind restoration tests.",
-      "Add an explicit async task-context adapter without global state."
+      "Validate Rust-emitted records directly against the canonical JSON Schema before package promotion."
     ]
   }
 }
