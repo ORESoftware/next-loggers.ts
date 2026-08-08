@@ -105,10 +105,11 @@ pub fn merge(base: LogContext, patch: LogContext) -> LogContext {
   let traces = append_unique_all(traces, patch.trace_ids)
   let primary_trace = case patch.trace_id {
     Some(value) -> Some(value)
-    None -> case base.trace_id {
-      Some(value) -> Some(value)
-      None -> first_option(traces)
-    }
+    None ->
+      case base.trace_id {
+        Some(value) -> Some(value)
+        None -> first_option(traces)
+      }
   }
   LogContext(
     logged_in_user: merge_user(base.logged_in_user, patch.logged_in_user),
@@ -193,15 +194,18 @@ pub fn update_current(patch: LogContext) -> Bool {
 
 fn contextual_fields(context: LogContext) -> core.JsonObject {
   let fields = case context.span_id {
-    Some(value) -> merge_object(context.fields, [#("otel.span_id", json.string(value))])
+    Some(value) ->
+      merge_object(context.fields, [#("otel.span_id", json.string(value))])
     None -> context.fields
   }
   let fields = case context.trace_flags {
-    Some(value) -> merge_object(fields, [#("otel.trace_flags", json.int(value))])
+    Some(value) ->
+      merge_object(fields, [#("otel.trace_flags", json.int(value))])
     None -> fields
   }
   let fields = case context.trace_state {
-    Some(value) -> merge_object(fields, [#("otel.trace_state", json.string(value))])
+    Some(value) ->
+      merge_object(fields, [#("otel.trace_state", json.string(value))])
     None -> fields
   }
   case context.baggage {
@@ -216,25 +220,28 @@ pub fn apply(event: core.LogEvent, context: LogContext) -> core.LogEvent {
     Some(user) -> core.set_logged_in_user(event, user)
     None -> event
   }
-  let event = list.fold(context.users, event, fn(event, user) {
-    core.add_user(event, user)
-  })
+  let event =
+    list.fold(context.users, event, fn(event, user) {
+      core.add_user(event, user)
+    })
   let traces = case context.trace_id {
     Some(value) -> append_unique([], value)
     None -> []
   }
   let traces = append_unique_all(traces, context.trace_ids)
-  let event = list.fold(traces, event, fn(event, trace_id) {
-    core.add_trace(event, trace_id)
-  })
+  let event =
+    list.fold(traces, event, fn(event, trace_id) {
+      core.add_trace(event, trace_id)
+    })
   let event = case context.routine_id {
     Some(value) -> core.add_routine_id(event, value)
     None -> event
   }
   let event = core.add_tags(event, context.tags)
-  let event = list.fold(context.context, event, fn(event, value) {
-    core.add_context(event, value)
-  })
+  let event =
+    list.fold(context.context, event, fn(event, value) {
+      core.add_context(event, value)
+    })
   list.fold(context.meta, event, fn(event, value) {
     core.add_meta(event, value)
   })

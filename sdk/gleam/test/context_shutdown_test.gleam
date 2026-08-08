@@ -12,12 +12,9 @@ pub fn main() {
 
 fn logger() -> logging.Logger {
   logging.new(
-    logging.options(
-      "context-test",
-      "gleam",
-      fn() { "record-1" },
-      fn() { "2026-01-02T03:04:05.000Z" },
-    ),
+    logging.options("context-test", "gleam", fn() { "record-1" }, fn() {
+      "2026-01-02T03:04:05.000Z"
+    }),
     logging.noop_transport(),
   )
 }
@@ -73,10 +70,12 @@ pub fn nested_context_merges_and_restores_test() {
     context.with_context(inner, fn() {
       let assert Some(current) = context.current_context()
       current.logged_in_user
-      |> should.equal(Some([
-        #("id", json.string("outer")),
-        #("role", json.string("admin")),
-      ]))
+      |> should.equal(
+        Some([
+          #("id", json.string("outer")),
+          #("role", json.string("admin")),
+        ]),
+      )
       current.tags |> should.equal(["outer", "inner"])
     })
     let assert Some(current) = context.current_context()
@@ -84,7 +83,6 @@ pub fn nested_context_merges_and_restores_test() {
     |> should.equal(Some([#("id", json.string("outer"))]))
   })
 }
-
 
 pub fn explicit_zero_trace_flags_override_parent_test() {
   let parent = context.LogContext(..context.new(), trace_flags: Some(1))
