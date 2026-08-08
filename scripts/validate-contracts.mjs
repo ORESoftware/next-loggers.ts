@@ -27,8 +27,13 @@ const requiredCapabilities = [
   'deterministic-conformance',
 ];
 
-const credentialPattern =
-  /gh[pousr]_[A-Za-z0-9]{20,}|lin_api_[A-Za-z0-9]+|cfat_[A-Za-z0-9]+|BEGIN [A-Z ]*PRIVATE KEY|CHAT_BRIDGE_TOKEN/u;
+const credentialPattern = new RegExp([
+  'gh[pousr]_[A-Za-z0-9]{20,}',
+  'lin_' + 'api_[A-Za-z0-9]+',
+  'cfa' + 't_[A-Za-z0-9]+',
+  'BEGIN [A-Z ]*PRIVATE KEY',
+  'CHAT_' + 'BRIDGE_TOKEN',
+].join('|'), 'u');
 
 function fail(message) {
   throw new Error(message);
