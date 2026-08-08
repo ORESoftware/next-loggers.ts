@@ -1,0 +1,103 @@
+{
+  "manifestVersion": "ores.otel.sdk-manifest/v1",
+  "language": "rust",
+  "ecosystem": "crates.io",
+  "runtime": "Rust native",
+  "sourceRoot": "sdk/rust",
+  "package": {
+    "legacyName": "oresoftware-next-loggers",
+    "canonicalName": "ores-otel-log",
+    "nativeModule": "ores_otel_log"
+  },
+  "repositories": {
+    "canonical": "ores-otel/ores.otel.log",
+    "legacy": "ORESoftware/next-loggers.ts"
+  },
+  "wire": {
+    "recordVersion": "next-loggers/v1",
+    "recordSchema": "contracts/log-record.schema.json",
+    "contextSchema": "contracts/schemas/log-context.schema.json",
+    "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
+    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+  },
+  "api": {
+    "logger": {
+      "trace": ["trace"],
+      "debug": ["debug"],
+      "info": ["info", "log"],
+      "warn": ["warn"],
+      "error": ["error"],
+      "fatal": ["fatal"],
+      "flush": ["flush"],
+      "flushOnExit": ["flush_on_exit"],
+      "close": ["close"]
+    },
+    "event": {
+      "addFields": ["add_fields"],
+      "addTrace": ["add_trace", "add_trace_id"],
+      "addRoutineId": ["add_routine_id"],
+      "addTags": ["add_tags"],
+      "addContext": ["add_context"],
+      "addMeta": ["add_meta"],
+      "addUser": ["add_user_info", "add_logged_in_user_info"],
+      "send": ["send"]
+    },
+    "transport": {
+      "write": ["write"],
+      "flush": ["flush"],
+      "flushOnExit": ["flush_on_exit"],
+      "close": ["close"]
+    }
+  },
+  "context": {
+    "status": "partial",
+    "strategy": "thread-local-and-task-scope",
+    "propagation": "thread",
+    "isolation": "concurrent-safe",
+    "symbols": {
+      "run": ["with_log_context"],
+      "current": ["current_log_context"],
+      "update": ["update_log_context"],
+      "apply": ["LogEvent::apply_context"],
+      "withSpan": ["with_span"]
+    },
+    "mergesLoggedInUser": true,
+    "mergesFields": true,
+    "deduplicatesTraceIds": true,
+    "restoresAfterFailure": true
+  },
+  "telemetry": {
+    "opentelemetry": {
+      "adapterSymbols": ["OpenTelemetryTransport"],
+      "explicit": true,
+      "automaticInstrumentation": false,
+      "monkeyPatching": false,
+      "ownsProvider": false,
+      "wrapsLoggerCalls": true,
+      "sampledOutCorrelation": false,
+      "recordingSpanEventsOnly": false
+    },
+    "supabase": {
+      "adapterSymbols": ["SupabaseTransport"],
+      "authenticatedSender": true,
+      "durableBatchSchema": "next-loggers/batch/v1",
+      "allowsDistributedSecrets": false,
+      "realtimeIsDurable": false
+    }
+  },
+  "conformance": {
+    "command": "cargo test --manifest-path sdk/rust/Cargo.toml",
+    "recordFixture": "contracts/fixtures/conformance-record.json",
+    "sourceFiles": ["sdk/rust/src/lib.rs", "sdk/rust/tests/conformance.rs"],
+    "validatesJsonSchema": false,
+    "testsContextIsolation": false,
+    "testsNoMonkeyPatching": false
+  },
+  "promotion": {
+    "ready": false,
+    "blockers": [
+      "Add scoped thread-local context with non-Send guards and unwind restoration tests.",
+      "Add an explicit async task-context adapter without global state."
+    ]
+  }
+}
