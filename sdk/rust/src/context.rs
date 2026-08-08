@@ -294,4 +294,19 @@ impl Logger {
         apply_current_log_context(self.debug(values))
     }
 
-    pub fn info_context(&self, values: Vec<Value>) -> Eventì(€€€€€€€…ÁÁ±å}ÕÉÉ•¹Ñ}±½}½¹Ñ•áĞ¡Í•±˜¹¥¹™¼¡Ù…±Õ•Ì¤¤(€€€ô((€€€ÁÕˆ™¸İ…É¹}½¹Ñ•áĞ ™Í•±˜°Ù…±Õ•ÌèY•ŒñY…±Õ”ø¤€´øÙ•¹Ğì(€€€€€€€…ÁÁ±å}ÕÉÉ•¹Ñ}±½}½¹Ñ•áĞ¡Í•±˜¹İ…É¸¡Ù…±Õ•Ì¤¤(€€€ô((€€€ÁÕˆ™¸•ÉÉ½É}½¹Ñ•áĞ ™Í•±˜°Ù…±Õ•ÌèY•ŒñY…±Õ”ø¤€´øÙ•¹Ğì(€€€€€€€…ÁÁ±å}ÕÉÉ•¹Ñ}±½}½¹Ñ•áĞ¡Í•±˜¹•ÉÉ½È¡Ù…±Õ•Ì¤¤(€€€ô((€€€ÁÕˆ™¸™…Ñ…±}½¹Ñ•áĞ ™Í•±˜°Ù…±Õ•ÌèY•ŒñY…±Õ”ø¤€´øÙ•¹Ğì(€€€€€€€…ÁÁ±å}ÕÉÉ•¹Ñ}±½}½¹Ñ•áĞ¡Í•±˜¹™…Ñ…°¡Ù…±Õ•Ì¤¤(€€€ô)ô(
+    pub fn info_context(&self, values: Vec<Value>) -> Event {
+        apply_current_log_context(self.info(values))
+    }
+
+    pub fn warn_context(&self, values: Vec<Value>) -> Event {
+        apply_current_log_context(self.warn(values))
+    }
+
+    pub fn error_context(&self, values: Vec<Value>) -> Event {
+        apply_current_log_context(self.error(values))
+    }
+
+    pub fn fatal_context(&self, values: Vec<Value>) -> Event {
+        apply_current_log_context(self.fatal(values))
+    }
+}
