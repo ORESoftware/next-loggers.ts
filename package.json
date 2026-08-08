@@ -114,7 +114,11 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
-    "./contracts/*": "./contracts/*",
+    "./contracts/log-record.schema.json": "./contracts/log-record.schema.json",
+    "./contracts/logger-api.schema.json": "./contracts/logger-api.schema.json",
+    "./contracts/logger-api.json": "./contracts/logger-api.json",
+    "./contracts/test-org-matrix.schema.json": "./contracts/test-org-matrix.schema.json",
+    "./contracts/test-org-matrix.json": "./contracts/test-org-matrix.json",
     "./package.json": "./package.json"
   },
   "scripts": {
