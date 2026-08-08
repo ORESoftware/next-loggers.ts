@@ -1,4 +1,4 @@
-name: Fix polyglot CI hardening v2
+name: Repair polyglot context lifecycle gates
 
 on:
   push:
@@ -9,19 +9,20 @@ permissions:
   contents: write
 
 concurrency:
-  group: fix-polyglot-ci-hardening-v2
+  group: repair-polyglot-context-lifecycle-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  fix:
+  repair:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
 
-      - name: Apply deterministic source fixes
+      - name: Apply deterministic source repairs
         shell: bash
         run: |
           set -euo pipefail
@@ -30,10 +31,20 @@ jobs:
 
           go_path = Path("sdk/go/context_test.go")
           go_text = go_path.read_text()
-          old_go = "value != byte(0)"
-          if go_text.count(old_go) != 1:
-              raise SystemExit(f"expected exactly one Go assertion, found {go_text.count(old_go)}")
-          go_path.write_text(go_text.replace(old_go, "value != 0"))
+          old_go = '''\tif value, exists := transport.Records[0].Fields["otel.trace_flags"]; !exists || value != byte(0) {
+\t\tt.Fatalf("explicit zero trace flags missing from record: %#v", transport.Records[0].Fields)
+\t}
+'''
+          new_go = '''\tvalue, exists := transport.Records[0].Fields["otel.trace_flags"]
+\ttraceFlags, numeric := value.(float64)
+\tif !exists || !numeric || traceFlags != 0 {
+\t\tt.Fatalf("explicit zero trace flags missing from record: %#v", transport.Records[0].Fields)
+\t}
+'''
+          if old_go in go_text:
+              go_path.write_text(go_text.replace(old_go, new_go, 1))
+          elif new_go not in go_text:
+              raise SystemExit("Go trace-flags assertion was not in an expected state")
 
           dart_path = Path("sdk/dart/lib/next_loggers.dart")
           lines = dart_path.read_text().splitlines()
@@ -60,13 +71,14 @@ jobs:
               else:
                   output.append(line)
 
-          expected = (2, 1, 1)
           actual = (flush_count, exit_flush_count, close_count)
-          if actual != expected:
-              raise SystemExit(f"unexpected Dart replacement counts: expected {expected}, got {actual}")
-
-          dart_path.write_text("\n".join(output) + "\n")
+          if actual == (2, 1, 1):
+              dart_path.write_text("\n".join(output) + "\n")
+          elif actual != (0, 0, 0):
+              raise SystemExit(f"unexpected Dart replacement counts: {actual}")
           PY
+
+          gofmt -w sdk/go/context_test.go
 
       - name: Install Rust formatter
         uses: dtolnay/rust-toolchain@stable
@@ -84,7 +96,7 @@ jobs:
       - name: Format Dart SDK
         run: dart format sdk/dart/lib sdk/dart/test
 
-      - name: Commit deterministic repairs
+      - name: Commit deterministic repairs and remove this one-shot workflow
         shell: bash
         run: |
           set -euo pipefail
