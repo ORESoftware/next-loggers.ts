@@ -5,13 +5,8 @@ on: push
 permissions:
   contents: read
 
-concurrency:
-  group: build-context-lifecycle-repair-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  repair-artifact:
-    if: github.ref == 'refs/heads/agent/polyglot-context-shutdown-20260808'
+  format:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -33,56 +28,9 @@ jobs:
           sdk: stable
 
       - name: Apply deterministic source repairs
-        shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-
-          go_path = Path('sdk/go/context_test.go')
-          go_text = go_path.read_text()
-          old_go = '''\tif value, exists := transport.Records[0].Fields["otel.trace_flags"]; !exists || value != byte(0) {
-\t\tt.Fatalf("explicit zero trace flags missing from record: %#v", transport.Records[0].Fields)
-\t}
-'''
-          new_go = '''\tvalue, exists := transport.Records[0].Fields["otel.trace_flags"]
-\ttraceFlags, numeric := value.(float64)
-\tif !exists || !numeric || traceFlags != 0 {
-\t\tt.Fatalf("explicit zero trace flags missing from record: %#v", transport.Records[0].Fields)
-\t}
-'''
-          if old_go in go_text:
-              go_path.write_text(go_text.replace(old_go, new_go, 1))
-          elif new_go not in go_text:
-              raise SystemExit('Go trace-flags assertion was not in an expected state')
-
-          dart_path = Path('sdk/dart/lib/next_loggers.dart')
-          dart_text = dart_path.read_text()
-          dart_text, flush_count = re.subn(
-              r'(?m)^(\s*)await transport\.flush\(\);$',
-              r'\1final flushable = transport as FlushableLogTransport;\n\1await flushable.flush();',
-              dart_text,
-          )
-          dart_text, exit_count = re.subn(
-              r'(?m)^(\s*)await transport\.flushOnExit\(([^\n]*)\);$',
-              r'\1final exitFlushable = transport as ExitFlushableLogTransport;\n\1await exitFlushable.flushOnExit(\2);',
-              dart_text,
-          )
-          dart_text, close_count = re.subn(
-              r'(?m)^(\s*)await transport\.close\(\);$',
-              r'\1final closable = transport as ClosableLogTransport;\n\1await closable.close();',
-              dart_text,
-          )
-          if flush_count not in (1, 2):
-              raise SystemExit(f'unexpected Dart flush replacement count: {flush_count}')
-          if exit_count != 1:
-              raise SystemExit(f'unexpected Dart exit-flush replacement count: {exit_count}')
-          if close_count != 1:
-              raise SystemExit(f'unexpected Dart close replacement count: {close_count}')
-          dart_path.write_text(dart_text)
-          PY
-
+          python3 tools/build_context_lifecycle_repair.py
           gofmt -w sdk/go/context_test.go
           cargo fmt --manifest-path sdk/rust-context/Cargo.toml
           dart format \
@@ -91,7 +39,6 @@ jobs:
             sdk/dart/test/context_shutdown.dart
 
       - name: Validate repaired runtimes
-        shell: bash
         run: |
           set -euo pipefail
           (cd sdk/go && go test ./...)
