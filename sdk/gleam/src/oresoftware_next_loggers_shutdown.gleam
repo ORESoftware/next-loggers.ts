@@ -36,12 +36,7 @@ pub type State {
 }
 
 pub fn new(interactive: Bool) -> State {
-  State(
-    phase: Running,
-    interactive:,
-    signal_count: 0,
-    eof_armed: False,
-  )
+  State(phase: Running, interactive:, signal_count: 0, eof_armed: False)
 }
 
 pub fn phase(state: State) -> Phase {
