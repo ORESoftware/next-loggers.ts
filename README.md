@@ -1,3 +1,6 @@
+<!-- ores-otel-canonical -->
+> **Canonical repository:** [`ores-otel/ores.otel.log`](https://github.com/ores-otel/ores.otel.log). `ORESoftware/next-loggers.ts` remains the legacy compatibility remote.
+
 # @oresoftware/next-loggers
 
 Dependency-free, ESM-only loggers for Next.js, browsers, edge workers, Cloudflare Workers, Node.js, Bun, and Deno. Log events are chainable, safely serialized, and can be sent to HTTP endpoints or streamed over Supabase Realtime WebSockets.

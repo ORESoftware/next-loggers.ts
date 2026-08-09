@@ -26,7 +26,7 @@ The move changes repository ownership and package branding, not the `next-logger
 ## Mirroring history
 
 ```sh
-git clone --mirror https://github.com/ORESoftware/next-loggers.ts.git
+git clone --mirror https://github.com/ores-otel/ores.otel.log.git
 cd next-loggers.ts.git
 git remote add canonical https://github.com/ores-otel/ores.otel.log.git
 git push --mirror canonical

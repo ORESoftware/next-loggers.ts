@@ -28,10 +28,10 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/ORESoftware/next-loggers.ts"
-Repository = "https://github.com/ORESoftware/next-loggers.ts/tree/main/sdk/python"
-Issues = "https://github.com/ORESoftware/next-loggers.ts/issues"
-Changelog = "https://github.com/ORESoftware/next-loggers.ts/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ores-otel/ores.otel.log"
+Repository = "https://github.com/ores-otel/ores.otel.log/tree/main/sdk/python"
+Issues = "https://github.com/ores-otel/ores.otel.log/issues"
+Changelog = "https://github.com/ores-otel/ores.otel.log/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 include-package-data = true

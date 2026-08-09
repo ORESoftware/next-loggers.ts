@@ -23,7 +23,7 @@ keywords = [
 
 [package.repository]
 vcs = "git"
-url = "https://github.com/ORESoftware/next-loggers.ts"
+url = "https://github.com/ores-otel/ores.otel.log"
 
 [dependencies]
 

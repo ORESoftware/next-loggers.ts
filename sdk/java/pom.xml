@@ -11,7 +11,7 @@
 
   <name>ORESoftware next-loggers</name>
   <description>Java implementation of the next-loggers/v1 structured logging contract</description>
-  <url>https://github.com/ORESoftware/next-loggers.ts</url>
+  <url>https://github.com/ores-otel/ores.otel.log</url>
 
   <licenses>
     <license>
@@ -33,15 +33,15 @@
   </developers>
 
   <scm>
-    <connection>scm:git:https://github.com/ORESoftware/next-loggers.ts.git</connection>
+    <connection>scm:git:https://github.com/ores-otel/ores.otel.log.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/ORESoftware/next-loggers.ts.git</developerConnection>
-    <url>https://github.com/ORESoftware/next-loggers.ts</url>
+    <url>https://github.com/ores-otel/ores.otel.log</url>
     <tag>sdk/java/v0.1.0</tag>
   </scm>
 
   <issueManagement>
     <system>GitHub</system>
-    <url>https://github.com/ORESoftware/next-loggers.ts/issues</url>
+    <url>https://github.com/ores-otel/ores.otel.log/issues</url>
   </issueManagement>
 
   <properties>

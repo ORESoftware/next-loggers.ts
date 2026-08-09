@@ -2,7 +2,7 @@ defmodule ORESoftware.NextLoggers.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/ORESoftware/next-loggers.ts"
+  @source_url "https://github.com/ores-otel/ores.otel.log"
 
   def project do
     [

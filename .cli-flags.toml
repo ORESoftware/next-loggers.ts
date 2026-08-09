@@ -1,7 +1,7 @@
 # flags-2-env contract for the `next-loggers` CLI.
 # Format: https://github.com/oresoftware/flags-2-env
 # Detailed CLI/package docs:
-# https://github.com/ORESoftware/next-loggers.ts/blob/main/docs/CLI.md
+# https://github.com/ores-otel/ores.otel.log/blob/main/docs/CLI.md
 #
 # This file is the portable, authoritative description of the flag/env and
 # command-help surface. `next-loggers packages` exposes the independently
@@ -41,7 +41,7 @@ command_env = "NEXT_LOGGER_CLI_COMMAND"
 allow_unknown = false
 
 [help]
-url = "https://github.com/ORESoftware/next-loggers.ts/blob/main/docs/CLI.md"
+url = "https://github.com/ores-otel/ores.otel.log/blob/main/docs/CLI.md"
 columns = ["options", "env", "type", "default", "description"]
 
 # ── Library contract ────────────────────────────────────────────────────────

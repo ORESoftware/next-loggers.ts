@@ -1,6 +1,6 @@
 import { BIN_NAME, COMMANDS, GLOBAL_FLAGS, type CommandSpec, type FlagSpec } from './spec.js';
 
-const HELP_URL = 'https://github.com/ORESoftware/next-loggers.ts/blob/main/docs/CLI.md';
+const HELP_URL = 'https://github.com/ores-otel/ores.otel.log/blob/main/docs/CLI.md';
 
 function optionColumn(flag: FlagSpec): string {
   const longs = flag.aliases.map((alias) => `--${alias}`).join(', ');

@@ -136,11 +136,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ORESoftware/next-loggers.ts.git"
+    "url": "git+https://github.com/ores-otel/ores.otel.log.git"
   },
-  "homepage": "https://github.com/ORESoftware/next-loggers.ts#readme",
+  "homepage": "https://github.com/ores-otel/ores.otel.log#readme",
   "bugs": {
-    "url": "https://github.com/ORESoftware/next-loggers.ts/issues"
+    "url": "https://github.com/ores-otel/ores.otel.log/issues"
   },
   "devDependencies": {
     "eslint": "^10.7.0",
