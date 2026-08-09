@@ -63,10 +63,7 @@ Future<void> main() async {
   final routedLogger = Logger(
     appName: 'routing',
     otel: false,
-    transports: <LogTransport>[
-      OpenTelemetryTransport(routedOtel.add),
-      regular,
-    ],
+    transports: <LogTransport>[OpenTelemetryTransport(routedOtel.add), regular],
   );
   final defaultOff = routedLogger.event(LogLevel.info, 'default-off');
   assert(!defaultOff.isOtelEnabled(routedLogger.isOtelEnabled()));
