@@ -408,7 +408,7 @@ class Logger {
   Future<void> flush() async {
     for (final transport in transports) {
       if (transport is FlushableLogTransport) {
-        await transport.flush();
+        await (transport as FlushableLogTransport).flush();
       }
     }
   }
@@ -416,7 +416,8 @@ class Logger {
   Future<void> flushOnExit() async {
     for (final transport in transports) {
       if (transport is ExitFlushableLogTransport) {
-        await transport.flushOnExit(const <Map<String, Object?>>[]);
+        await (transport as ExitFlushableLogTransport)
+            .flushOnExit(const <Map<String, Object?>>[]);
       }
     }
     await flush();
@@ -429,7 +430,7 @@ class Logger {
     await flushOnExit();
     for (final transport in transports) {
       if (transport is ClosableLogTransport) {
-        await transport.close();
+        await (transport as ClosableLogTransport).close();
       }
     }
     _closed = true;
