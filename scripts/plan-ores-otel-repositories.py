@@ -138,23 +138,34 @@ def seed_test_repo(repository: dict[str, Any], *, apply: bool) -> None:
 
 
 def mirror_history(*, apply: bool) -> None:
+    """Mirror user-owned branch and tag refs, excluding GitHub's read-only refs/pull namespace."""
+    refspecs = [
+        "+refs/heads/*:refs/heads/*",
+        "+refs/tags/*:refs/tags/*",
+    ]
     if not apply:
         print(f"DRY-RUN: gh repo clone {LEGACY} <temporary>/legacy.git -- --mirror")
         print(f"DRY-RUN: git -C <temporary>/legacy.git remote add canonical https://github.com/{CANONICAL}.git")
-        print("DRY-RUN: git -C <temporary>/legacy.git push --mirror canonical")
+        print(
+            "DRY-RUN: git -C <temporary>/legacy.git push --prune canonical "
+            + " ".join(refspecs)
+        )
         return
     with tempfile.TemporaryDirectory(prefix="ores-otel-mirror-") as directory:
         mirror = Path(directory) / "legacy.git"
         run(["gh", "repo", "clone", LEGACY, str(mirror), "--", "--mirror"], apply=True)
         run(["git", "-C", str(mirror), "remote", "add", "canonical", f"https://github.com/{CANONICAL}.git"], apply=True)
-        run(["git", "-C", str(mirror), "push", "--mirror", "canonical"], apply=True)
+        run(
+            ["git", "-C", str(mirror), "push", "--prune", "canonical", *refspecs],
+            apply=True,
+        )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Perform writes. Default is a dry-run.")
     parser.add_argument("--visibility", choices=("private", "public"), help="Required with --apply.")
-    parser.add_argument("--mirror-history", action="store_true", help="Mirror all Git refs after creating canonical repo.")
+    parser.add_argument("--mirror-history", action="store_true", help="Mirror all user-owned branch/tag refs after creating canonical repo.")
     parser.add_argument("--seed-tests", action="store_true", help="Seed exact-head contract workflows in test repos.")
     return parser.parse_args()
 
@@ -186,7 +197,7 @@ def main() -> int:
     if args.mirror_history:
         mirror_history(apply=args.apply)
     else:
-        print("history mirror skipped; pass --mirror-history to preserve all refs")
+        print("history mirror skipped; pass --mirror-history to preserve branch and tag refs")
 
     for repository in repositories:
         full_name = f"{TEST_ORG}/{repository['name']}"
