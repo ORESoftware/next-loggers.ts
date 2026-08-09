@@ -18,6 +18,8 @@ type LogContext struct {
 	TraceFlags    byte
 	TraceFlagsSet bool
 	TraceState    string
+	Remote        bool
+	HasRemote     bool
 	Baggage       map[string]string
 	RoutineID     string
 	Tags          []string
@@ -31,6 +33,9 @@ type TraceContext = LogContext
 type logContextKey struct{}
 
 func cloneStringMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
 	target := make(map[string]string, len(source))
 	for key, value := range source {
 		target[key] = value
@@ -39,6 +44,9 @@ func cloneStringMap(source map[string]string) map[string]string {
 }
 
 func cloneUserList(source []map[string]any) []map[string]any {
+	if source == nil {
+		return nil
+	}
 	target := make([]map[string]any, 0, len(source))
 	for _, value := range source {
 		target = append(target, cloneMap(value))
@@ -73,9 +81,9 @@ func appendUniqueString(values []string, candidate string) []string {
 	return append(values, candidate)
 }
 
-// MergeLogContexts applies patch semantics matching the TypeScript async-local
-// store: maps merge, lists append, trace/tag identifiers are de-duplicated, and
-// non-empty scalar identifiers replace the current value.
+// MergeLogContexts applies canonical scope merge rules: maps merge with the
+// inner scope winning; users/context/meta append; trace IDs and tags deduplicate
+// while retaining order; and present scalar values replace their parent value.
 func MergeLogContexts(base LogContext, patch LogContext) LogContext {
 	merged := cloneLogContext(base)
 	if merged.TraceID != "" {
@@ -103,12 +111,22 @@ func MergeLogContexts(base LogContext, patch LogContext) LogContext {
 	if patch.SpanID != "" {
 		merged.SpanID = patch.SpanID
 	}
-	if patch.TraceFlagsSet || patch.TraceFlags != 0 {
+	// Trace flags are meaningful even when zero. Explicit TraceFlagsSet is the
+	// unambiguous signal; trace/span IDs also identify an OTEL span context whose
+	// sampled bit may legitimately be zero.
+	if patch.TraceFlagsSet || patch.TraceFlags != 0 || patch.TraceID != "" || patch.SpanID != "" {
 		merged.TraceFlags = patch.TraceFlags
 		merged.TraceFlagsSet = true
 	}
 	if patch.TraceState != "" {
 		merged.TraceState = patch.TraceState
+	}
+	if patch.HasRemote {
+		merged.Remote = patch.Remote
+		merged.HasRemote = true
+	}
+	if merged.Baggage == nil && len(patch.Baggage) > 0 {
+		merged.Baggage = make(map[string]string, len(patch.Baggage))
 	}
 	for key, value := range patch.Baggage {
 		merged.Baggage[key] = value
@@ -124,19 +142,33 @@ func MergeLogContexts(base LogContext, patch LogContext) LogContext {
 	return merged
 }
 
-// WithLogContext returns a child context carrying an immutable snapshot.
-func WithLogContext(parent context.Context, value LogContext) context.Context {
+// MergeLogContext preserves the tracing-focused value-level API introduced by
+// the canonical Go SDK while using the complete LogContext merge semantics.
+func MergeLogContext(outer, inner TraceContext) TraceContext {
+	return MergeLogContexts(outer, inner)
+}
+
+func withLogContextSnapshot(parent context.Context, value LogContext) context.Context {
 	if parent == nil {
 		parent = context.Background()
 	}
 	return context.WithValue(parent, logContextKey{}, cloneLogContext(value))
 }
 
-// MergeLogContext returns a child context containing the current value merged
-// with patch. It never mutates a value stored in an ancestor context.
-func MergeLogContext(parent context.Context, patch LogContext) context.Context {
+// WithLogContext returns a child context carrying an immutable merged snapshot.
+// Child goroutines must receive the returned context explicitly.
+func WithLogContext(parent context.Context, value LogContext) context.Context {
+	if parent == nil {
+		parent = context.Background()
+	}
 	current, _ := LogContextFrom(parent)
-	return WithLogContext(parent, MergeLogContexts(current, patch))
+	return withLogContextSnapshot(parent, MergeLogContexts(current, value))
+}
+
+// WithMergedLogContext is an explicit alias for callers that want the merge
+// semantics to be visible at the call site.
+func WithMergedLogContext(parent context.Context, patch LogContext) context.Context {
+	return WithLogContext(parent, patch)
 }
 
 // LogContextFrom returns an immutable copy of the context value.
@@ -151,8 +183,18 @@ func LogContextFrom(ctx context.Context) (LogContext, bool) {
 	return cloneLogContext(value), true
 }
 
+// UpdateLogContext replaces the current immutable snapshot with the value
+// returned by update. The callback receives a defensive copy.
+func UpdateLogContext(ctx context.Context, update func(LogContext) LogContext) context.Context {
+	if update == nil {
+		return ctx
+	}
+	current, _ := LogContextFrom(ctx)
+	return withLogContextSnapshot(ctx, update(current))
+}
+
 func WithLoggedInUser(ctx context.Context, user map[string]any) context.Context {
-	return MergeLogContext(ctx, LogContext{LoggedInUser: user})
+	return WithLogContext(ctx, LogContext{LoggedInUser: user})
 }
 
 // LoggedInUserFrom returns a defensive copy of the current authenticated user.
@@ -165,14 +207,14 @@ func LoggedInUserFrom(ctx context.Context) (map[string]any, bool) {
 }
 
 func WithTraceFlags(ctx context.Context, traceFlags byte) context.Context {
-	return MergeLogContext(ctx, LogContext{
+	return WithLogContext(ctx, LogContext{
 		TraceFlags:    traceFlags,
 		TraceFlagsSet: true,
 	})
 }
 
 func WithTrace(ctx context.Context, traceID, spanID string) context.Context {
-	return MergeLogContext(ctx, LogContext{
+	return WithLogContext(ctx, LogContext{
 		TraceID:  traceID,
 		TraceIDs: []string{traceID},
 		SpanID:   spanID,
@@ -227,6 +269,9 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 	if value.TraceState != "" {
 		fields["otel.trace_state"] = value.TraceState
 	}
+	if value.HasRemote {
+		fields["otel.remote"] = value.Remote
+	}
 	if len(value.Baggage) > 0 {
 		fields["otel.baggage"] = cloneStringMap(value.Baggage)
 	}
@@ -248,6 +293,10 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 	if value.RoutineID != "" {
 		event.AddRoutineID(value.RoutineID)
 	}
+	otelContext := value.TraceID != "" || value.SpanID != "" || value.TraceFlagsSet || value.TraceState != "" || value.HasRemote || len(value.Baggage) > 0
+	if otelContext {
+		event.AddTags("otel")
+	}
 	if len(value.Tags) > 0 {
 		event.AddTags(value.Tags...)
 	}
@@ -258,23 +307,4 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		event.AddMeta(item)
 	}
 	return event
-}
-
-func (logger *Logger) TraceContext(ctx context.Context, values ...any) *Event {
-	return logger.Trace(values...).ApplyContext(ctx)
-}
-func (logger *Logger) DebugContext(ctx context.Context, values ...any) *Event {
-	return logger.Debug(values...).ApplyContext(ctx)
-}
-func (logger *Logger) InfoContext(ctx context.Context, values ...any) *Event {
-	return logger.Info(values...).ApplyContext(ctx)
-}
-func (logger *Logger) WarnContext(ctx context.Context, values ...any) *Event {
-	return logger.Warn(values...).ApplyContext(ctx)
-}
-func (logger *Logger) ErrorContext(ctx context.Context, values ...any) *Event {
-	return logger.Error(values...).ApplyContext(ctx)
-}
-func (logger *Logger) FatalContext(ctx context.Context, values ...any) *Event {
-	return logger.Fatal(values...).ApplyContext(ctx)
 }
