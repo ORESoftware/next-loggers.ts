@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: bootstrap-ores-otel-organizations
@@ -23,47 +24,121 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      GH_TOKEN: ${{ secrets.ORES_OTEL_GH_PAT || secrets.GH_PAT || secrets.GH_TOKEN || secrets.GITHUB_PAT || secrets.GITHUB_ADMIN_PAT || secrets.ORG_ADMIN_PAT || secrets.ORG_ADMIN_TOKEN || secrets.REPO_ADMIN_TOKEN || secrets.BOOTSTRAP_GH_PAT }}
+      CHANNEL_TOKEN: ${{ github.token }}
+      HANDOFF_ISSUE: "20"
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require a preconfigured encrypted organization-admin token
+      - name: Receive an ephemeral encrypted organization-admin token and bootstrap repositories
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::error::No encrypted organization-admin PAT secret is configured for this repository."
+
+          private_key="${RUNNER_TEMP}/ores-otel-bootstrap-private.pem"
+          public_key="${RUNNER_TEMP}/ores-otel-bootstrap-public.pem"
+          ciphertext_file="${RUNNER_TEMP}/ores-otel-bootstrap-ciphertext.bin"
+          public_comment_id=""
+          ciphertext_comment_id=""
+
+          cleanup() {
+            set +e
+            if [[ -n "${ciphertext_comment_id}" ]]; then
+              GH_TOKEN="${CHANNEL_TOKEN}" gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/issues/comments/${ciphertext_comment_id}" >/dev/null
+            fi
+            if [[ -n "${public_comment_id}" ]]; then
+              GH_TOKEN="${CHANNEL_TOKEN}" gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/issues/comments/${public_comment_id}" >/dev/null
+            fi
+            rm -f "${private_key}" "${public_key}" "${ciphertext_file}"
+          }
+          trap cleanup EXIT
+
+          openssl genpkey \
+            -algorithm RSA \
+            -pkeyopt rsa_keygen_bits:3072 \
+            -out "${private_key}" 2>/dev/null
+          openssl pkey -in "${private_key}" -pubout -out "${public_key}" 2>/dev/null
+
+          public_key_b64="$(base64 -w0 "${public_key}")"
+          public_marker="ORES_OTEL_PUBLIC_KEY:${GITHUB_RUN_ID}:${public_key_b64}"
+          public_comment_id="$(
+            GH_TOKEN="${CHANNEL_TOKEN}" gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${HANDOFF_ISSUE}/comments" \
+              -f body="${public_marker}" \
+              --jq '.id'
+          )"
+          echo "::notice::Posted an ephemeral public key for bootstrap run ${GITHUB_RUN_ID}."
+
+          ciphertext_prefix="ORES_OTEL_CIPHERTEXT:${GITHUB_RUN_ID}:"
+          handoff=""
+          for attempt in $(seq 1 180); do
+            comments_json="$(
+              GH_TOKEN="${CHANNEL_TOKEN}" gh api \
+                "repos/${GITHUB_REPOSITORY}/issues/${HANDOFF_ISSUE}/comments?per_page=100"
+            )"
+            handoff="$(
+              jq -r \
+                --arg owner "${GITHUB_REPOSITORY_OWNER}" \
+                --arg prefix "${ciphertext_prefix}" \
+                '.[] | select(.user.login == $owner and (.body | startswith($prefix))) | [.id, .body] | @tsv' \
+                <<<"${comments_json}" | tail -n 1
+            )"
+            if [[ -n "${handoff}" ]]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [[ -z "${handoff}" ]]; then
+            echo "::error::Timed out before receiving the encrypted organization-admin token."
             exit 1
           fi
 
-      - name: Verify GitHub organization administration access
-        shell: bash
-        run: |
-          set -euo pipefail
+          ciphertext_comment_id="${handoff%%$'\t'*}"
+          ciphertext_body="${handoff#*$'\t'}"
+          ciphertext_b64="${ciphertext_body#${ciphertext_prefix}}"
+          printf '%s' "${ciphertext_b64}" | base64 -d >"${ciphertext_file}"
+
+          admin_token="$(
+            openssl pkeyutl -decrypt \
+              -inkey "${private_key}" \
+              -in "${ciphertext_file}" \
+              -pkeyopt rsa_padding_mode:oaep \
+              -pkeyopt rsa_oaep_md:sha256
+          )"
+          case "${admin_token}" in
+            ghp_*|github_pat_*) ;;
+            *)
+              echo "::error::The encrypted handoff did not contain a recognized GitHub token."
+              exit 1
+              ;;
+          esac
+          echo "::add-mask::${admin_token}"
+
+          export GH_TOKEN="${admin_token}"
+          unset admin_token
           gh auth status
+          gh auth setup-git
           gh api /user --jq '.login'
           gh api /orgs/ores-otel --jq '.login'
           gh api /orgs/ores-otel-test --jq '.login'
 
-      - name: Create repositories, mirror complete history, and seed exact-head tests
-        shell: bash
-        run: |
-          set -euo pipefail
           python scripts/plan-ores-otel-repositories.py \
             --apply \
             --visibility public \
             --mirror-history \
             --seed-tests
 
-      - name: Verify canonical repository and test fleet
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh repo view ores-otel/ores.otel.log --json nameWithOwner,defaultBranchRef,visibility
-          count="$(gh repo list ores-otel-test --limit 100 --json name --jq '[.[] | select(.name | startswith("ores-otel-log-"))] | length')"
+          gh repo view ores-otel/ores.otel.log \
+            --json nameWithOwner,defaultBranchRef,visibility
+          count="$(
+            gh repo list ores-otel-test --limit 100 --json name \
+              --jq '[.[] | select(.name | startswith("ores-otel-log-"))] | length'
+          )"
           if (( count < 10 )); then
             echo "::error::Expected at least 10 ores-otel-test repositories; found ${count}."
             exit 1
