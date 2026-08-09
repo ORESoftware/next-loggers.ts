@@ -188,6 +188,58 @@ abstract interface class ClosableLogTransport {
   FutureOr<void> close();
 }
 
+bool _isOtelTransport(LogTransport transport) {
+  if (transport is OpenTelemetryTransport) return true;
+  try {
+    final dynamic candidate = transport;
+    return candidate.otel == true ||
+        candidate.name?.toString().toLowerCase() == 'opentelemetry';
+  } on Object {
+    return false;
+  }
+}
+
+class LogEvent {
+  LogEvent(
+    this.logger,
+    this.level,
+    this.message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    List<Object?> values = const <Object?>[],
+  }) : fields = Map<String, Object?>.from(fields),
+       values = List<Object?>.from(values);
+
+  final Logger logger;
+  final LogLevel level;
+  final String message;
+  final Map<String, Object?> fields;
+  final List<Object?> values;
+  bool? _otelEnabled;
+
+  LogEvent useOtel() => withOtel(true);
+  LogEvent notOtel() => withOtel(false);
+
+  LogEvent withOtel(bool enabled) {
+    _otelEnabled = enabled;
+    return this;
+  }
+
+  LogEvent resetOtel() {
+    _otelEnabled = null;
+    return this;
+  }
+
+  bool isOtelEnabled(bool fallback) => _otelEnabled ?? fallback;
+
+  Future<Map<String, Object?>> send() => logger.log(
+    level,
+    message,
+    fields: fields,
+    values: values,
+    otelEnabled: _otelEnabled,
+  );
+}
+
 class Logger {
   Logger({
     required this.appName,
@@ -197,6 +249,7 @@ class Logger {
     Map<String, Object?> fields = const <String, Object?>{},
     Map<String, Object?> loggedInUser = const <String, Object?>{},
     List<LogTransport> transports = const <LogTransport>[],
+    this.otel = true,
     String Function()? idFactory,
     String Function()? clock,
   }) : fields = Map<String, Object?>.from(fields),
@@ -212,6 +265,7 @@ class Logger {
   final Map<String, Object?> fields;
   final Map<String, Object?> loggedInUser;
   final List<LogTransport> transports;
+  bool otel;
   final String Function() idFactory;
   final String Function() clock;
   bool _closed = false;
@@ -225,6 +279,22 @@ class Logger {
     loggedInUser.addAll(Map<String, Object?>.from(user));
     return this;
   }
+
+  Logger setOtelEnabled(bool enabled) {
+    otel = enabled;
+    return this;
+  }
+
+  Logger useOtel() => setOtelEnabled(true);
+  Logger notOtel() => setOtelEnabled(false);
+  bool isOtelEnabled() => otel;
+
+  LogEvent event(
+    LogLevel level,
+    String message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    List<Object?> values = const <Object?>[],
+  }) => LogEvent(this, level, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> trace(
     String message, {
@@ -300,6 +370,7 @@ class Logger {
     List<Object?> meta = const <Object?>[],
     List<Object?> errors = const <Object?>[],
     List<String> stackTrace = const <String>[],
+    bool? otelEnabled,
   }) async {
     if (appName.trim().isEmpty) {
       throw ArgumentError.value(appName, 'appName', 'must not be empty');
@@ -393,6 +464,9 @@ class Logger {
 
     if (level.index >= minimumLevel.index) {
       for (final transport in transports) {
+        if (_isOtelTransport(transport) && !(otelEnabled ?? otel)) {
+          continue;
+        }
         await transport.write(_recordCopy(record));
       }
     }
@@ -435,6 +509,8 @@ class Logger {
 class OpenTelemetryTransport implements LogTransport {
   OpenTelemetryTransport(this.emit);
   final FutureOr<void> Function(Map<String, Object?> record) emit;
+  bool get otel => true;
+  String get name => 'opentelemetry';
 
   @override
   FutureOr<void> write(Map<String, Object?> record) {

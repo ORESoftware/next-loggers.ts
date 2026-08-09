@@ -174,6 +174,7 @@ class OpenTelemetryTransport:
     """Dependency-free adapter for an application-owned OTEL log emitter."""
 
     name = "opentelemetry"
+    otel = True
 
     def __init__(self, emit: Callable[[Dict[str, Any]], None]) -> None:
         if not callable(emit):
@@ -236,12 +237,30 @@ class LogEvent:
         self.context: List[Any] = []
         self.meta: List[Any] = []
         self.stack_trace: List[str] = []
+        self._otel_enabled: Optional[bool] = None
         self._record: Optional[LogRecord] = None
         self._sent = False
 
     def add_fields(self, fields: Mapping[str, Any]) -> "LogEvent":
         self.fields.update(fields)
         return self
+
+    def use_otel(self) -> "LogEvent":
+        return self.with_otel(True)
+
+    def not_otel(self) -> "LogEvent":
+        return self.with_otel(False)
+
+    def with_otel(self, enabled: bool) -> "LogEvent":
+        self._otel_enabled = bool(enabled)
+        return self
+
+    def reset_otel(self) -> "LogEvent":
+        self._otel_enabled = None
+        return self
+
+    def is_otel_enabled(self, fallback: bool) -> bool:
+        return bool(fallback) if self._otel_enabled is None else self._otel_enabled
 
     def add_trace(self, trace_id: str, make_first: bool = False) -> "LogEvent":
         value = str(trace_id or "").strip()
@@ -344,6 +363,7 @@ class Logger:
         fields: Optional[Mapping[str, Any]] = None,
         logged_in_user: Optional[Mapping[str, Any]] = None,
         transports: Optional[Iterable[Transport]] = None,
+        otel: bool = True,
         console: bool = True,
         id_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
         clock: Callable[[], str] = _default_clock,
@@ -355,6 +375,7 @@ class Logger:
         self.fields = dict(fields or {})
         self.current_user = dict(logged_in_user or {})
         self.transports = list(transports or [])
+        self.otel = bool(otel)
         self.console = console
         self.id_factory = id_factory
         self.clock = clock
@@ -404,6 +425,19 @@ class Logger:
             self.current_user.update(user)
         return self
 
+    def set_otel_enabled(self, enabled: bool) -> "Logger":
+        self.otel = bool(enabled)
+        return self
+
+    def use_otel(self) -> "Logger":
+        return self.set_otel_enabled(True)
+
+    def not_otel(self) -> "Logger":
+        return self.set_otel_enabled(False)
+
+    def is_otel_enabled(self) -> bool:
+        return self.otel
+
     def _enabled(self, level: LogLevel) -> bool:
         return _LEVEL_INDEX[level] >= _LEVEL_INDEX[self.max_level]
 
@@ -422,6 +456,10 @@ class Logger:
             )
         if store:
             for transport in self.transports:
+                name = str(getattr(transport, "name", "")).lower()
+                is_otel = bool(getattr(transport, "otel", False)) or name == "opentelemetry"
+                if is_otel and not event.is_otel_enabled(self.is_otel_enabled()):
+                    continue
                 transport.write(record)
         return record
 

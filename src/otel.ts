@@ -1,6 +1,7 @@
 import type {
   LogContextProvider,
   LogLevel,
+  LoggerOptions,
   LogRecord,
   LogTransport,
   SerializedValue,
@@ -464,6 +465,7 @@ export function createOpenTelemetryContextProvider(
  */
 export class OpenTelemetryTransport implements LogTransport {
   readonly name = 'opentelemetry';
+  readonly otel = true;
 
   constructor(private readonly options: OpenTelemetryTransportOptions) {
     if (!options?.logger || typeof options.logger.emit !== 'function') {
@@ -563,4 +565,33 @@ export function createOpenTelemetryTransport(
   options: OpenTelemetryTransportOptions,
 ): OpenTelemetryTransport {
   return new OpenTelemetryTransport(options);
+}
+
+/**
+ * Add the explicit OpenTelemetry bridge without replacing existing transports
+ * or an application-supplied context provider. When `activeSpan` is present,
+ * span correlation is installed automatically unless the caller already chose
+ * a provider.
+ */
+export function withOpenTelemetry(
+  loggerOptions: LoggerOptions,
+  bridge: OpenTelemetryTransportOptions,
+): LoggerOptions {
+  const existing = loggerOptions.transports
+    ? Array.isArray(loggerOptions.transports)
+      ? loggerOptions.transports
+      : [loggerOptions.transports]
+    : [];
+  const contextProvider =
+    loggerOptions.contextProvider ??
+    (bridge.activeSpan
+      ? createOpenTelemetryContextProvider(bridge.activeSpan, {
+          ...(bridge.onBridgeError ? { onBridgeError: bridge.onBridgeError } : {}),
+        })
+      : undefined);
+  return {
+    ...loggerOptions,
+    transports: [...existing, createOpenTelemetryTransport(bridge)],
+    ...(contextProvider ? { contextProvider } : {}),
+  };
 }
