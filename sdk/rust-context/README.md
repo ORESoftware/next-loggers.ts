@@ -13,8 +13,9 @@ Execution-context and shutdown-policy companion for the Rust
   for async server code.
 - `spawn_with_current_context` snapshots and explicitly propagates the active
   context into a newly spawned Tokio task.
-- `LoggerContextExt` adds explicit (`info_context`) and ambient
-  (`info_ambient`) event constructors.
+- `LoggerContextExt` adds explicit (`info_with_context`) and ambient
+  (`info_ambient`) event constructors without colliding with the canonical SDK’s
+  inherent `info_context(values)` ambient API.
 
 ```rust
 use next_loggers::{json, JsonObject, Logger, Options, Value};

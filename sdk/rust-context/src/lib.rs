@@ -279,12 +279,12 @@ pub fn apply_context(event: Event, context: &LogContext) -> Event {
 }
 
 pub trait LoggerContextExt {
-    fn trace_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
-    fn debug_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
-    fn info_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
-    fn warn_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
-    fn error_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
-    fn fatal_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
+    fn trace_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
+    fn debug_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
+    fn info_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
+    fn warn_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
+    fn error_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
+    fn fatal_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event;
 
     fn trace_ambient(&self, values: Vec<Value>) -> Event;
     fn debug_ambient(&self, values: Vec<Value>) -> Event;
@@ -302,22 +302,22 @@ fn ambient(event: Event) -> Event {
 }
 
 impl LoggerContextExt for Logger {
-    fn trace_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
+    fn trace_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
         apply_context(self.trace(values), context)
     }
-    fn debug_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
+    fn debug_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
         apply_context(self.debug(values), context)
     }
-    fn info_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
+    fn info_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
         apply_context(self.info(values), context)
     }
-    fn warn_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
+    fn warn_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
         apply_context(self.warn(values), context)
     }
-    fn error_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
+    fn error_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
         apply_context(self.error(values), context)
     }
-    fn fatal_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
+    fn fatal_with_context(&self, context: &LogContext, values: Vec<Value>) -> Event {
         apply_context(self.fatal(values), context)
     }
 

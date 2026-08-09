@@ -85,7 +85,7 @@ fn context_applies_user_trace_span_and_routine() {
     };
 
     let record = logger
-        .info_context(&context, vec![json!("hello")])
+        .info_with_context(&context, vec![json!("hello")])
         .to_record()
         .unwrap();
     assert_eq!(
