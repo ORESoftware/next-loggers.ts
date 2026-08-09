@@ -1,0 +1,71 @@
+name: Bootstrap ores-otel organizations
+
+on:
+  push:
+    branches:
+      - agent/bootstrap-ores-otel-orgs
+    paths:
+      - .github/workflows/bootstrap-ores-otel-orgs.yml
+      - scripts/plan-ores-otel-repositories.py
+      - contracts/migration/test-repository-matrix.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-ores-otel-organizations
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: Create canonical and conformance repositories
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.ORES_OTEL_GH_PAT || secrets.GH_PAT || secrets.GH_TOKEN || secrets.GITHUB_PAT || secrets.GITHUB_ADMIN_PAT || secrets.ORG_ADMIN_PAT || secrets.ORG_ADMIN_TOKEN || secrets.REPO_ADMIN_TOKEN || secrets.BOOTSTRAP_GH_PAT }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a preconfigured encrypted organization-admin token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::No encrypted organization-admin PAT secret is configured for this repository."
+            exit 1
+          fi
+
+      - name: Verify GitHub organization administration access
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth status
+          gh api /user --jq '.login'
+          gh api /orgs/ores-otel --jq '.login'
+          gh api /orgs/ores-otel-test --jq '.login'
+
+      - name: Create repositories, mirror complete history, and seed exact-head tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/plan-ores-otel-repositories.py \
+            --apply \
+            --visibility public \
+            --mirror-history \
+            --seed-tests
+
+      - name: Verify canonical repository and test fleet
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh repo view ores-otel/ores.otel.log --json nameWithOwner,defaultBranchRef,visibility
+          count="$(gh repo list ores-otel-test --limit 100 --json name --jq '[.[] | select(.name | startswith("ores-otel-log-"))] | length')"
+          if (( count < 10 )); then
+            echo "::error::Expected at least 10 ores-otel-test repositories; found ${count}."
+            exit 1
+          fi
+          echo "Created or verified ${count} conformance repositories."
