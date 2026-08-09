@@ -4,7 +4,9 @@ import 'dart:io';
 import 'next_loggers.dart';
 
 enum ShutdownCause { sigint, sigterm, stdinEof, timeout, programmatic }
+
 enum ShutdownPhase { running, draining, forced, closed }
+
 enum ShutdownAction { beginGraceful, force, ignore }
 
 class ShutdownStateMachine {
@@ -127,8 +129,8 @@ class ProcessShutdownOptions {
 
 class ProcessShutdownController {
   ProcessShutdownController._(this._options, this._interactive)
-      : state = ShutdownStateMachine(interactive: _interactive),
-        _clock = _options.clock ?? DateTime.now;
+    : state = ShutdownStateMachine(interactive: _interactive),
+      _clock = _options.clock ?? DateTime.now;
 
   final ProcessShutdownOptions _options;
   final bool _interactive;
@@ -155,15 +157,17 @@ class ProcessShutdownController {
     Object? error,
   ]) {
     try {
-      _options.onLog?.call(ShutdownEvent(
-        phase: phase,
-        action: action,
-        cause: cause,
-        interactive: _interactive,
-        signalCount: state.signalCount,
-        message: message,
-        error: error,
-      ));
+      _options.onLog?.call(
+        ShutdownEvent(
+          phase: phase,
+          action: action,
+          cause: cause,
+          interactive: _interactive,
+          signalCount: state.signalCount,
+          message: message,
+          error: error,
+        ),
+      );
     } catch (_) {
       // Logging must never block shutdown.
     }
@@ -229,15 +233,11 @@ class ProcessShutdownController {
     }
   }
 
-  void requestGraceful([
-    ShutdownCause cause = ShutdownCause.programmatic,
-  ]) {
+  void requestGraceful([ShutdownCause cause = ShutdownCause.programmatic]) {
     trigger(cause);
   }
 
-  void force([
-    ShutdownCause cause = ShutdownCause.programmatic,
-  ]) {
+  void force([ShutdownCause cause = ShutdownCause.programmatic]) {
     if (state.forceNow() == ShutdownAction.force) {
       _startForce(cause);
     }
@@ -313,13 +313,15 @@ class ProcessShutdownController {
           ? 'graceful shutdown completed'
           : 'forceful shutdown completed',
     );
-    _done.complete(ShutdownResult(
-      phase: phase,
-      cause: cause,
-      startedAt: _startedAt ?? _clock(),
-      finishedAt: _clock(),
-      errors: List<Object>.unmodifiable(_errors),
-    ));
+    _done.complete(
+      ShutdownResult(
+        phase: phase,
+        cause: cause,
+        startedAt: _startedAt ?? _clock(),
+        finishedAt: _clock(),
+        errors: List<Object>.unmodifiable(_errors),
+      ),
+    );
   }
 
   void dispose() {
@@ -350,11 +352,7 @@ void Function(ShutdownEvent) loggerShutdownLog(Logger logger) {
           'shutdown.signal_count': event.signalCount,
         };
         if (event.error != null) {
-          await logger.error(
-            event.message,
-            fields: fields,
-            error: event.error,
-          );
+          await logger.error(event.message, fields: fields, error: event.error);
         } else if (event.phase == ShutdownPhase.forced) {
           await logger.warn(event.message, fields: fields);
         } else {
@@ -399,10 +397,12 @@ ProcessShutdownController installProcessShutdown(
       (_) => controller.trigger(ShutdownCause.stdinEof),
     );
   } else if (interactive && options.watchStdinEof) {
-    controller._subscriptions.add(stdin.cast<Object?>().listen(
-      (_) {},
-      onDone: () => controller.trigger(ShutdownCause.stdinEof),
-    ));
+    controller._subscriptions.add(
+      stdin.cast<Object?>().listen(
+        (_) {},
+        onDone: () => controller.trigger(ShutdownCause.stdinEof),
+      ),
+    );
   }
 
   return controller;

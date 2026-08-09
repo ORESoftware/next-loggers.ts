@@ -110,9 +110,10 @@ impl ThreadContextGuard {
             id
         });
         THREAD_CONTEXT.with(|stack| {
-            stack
-                .borrow_mut()
-                .push(ThreadContextFrame { id: frame_id, context });
+            stack.borrow_mut().push(ThreadContextFrame {
+                id: frame_id,
+                context,
+            });
         });
         Self {
             owner: std::thread::current().id(),
@@ -226,9 +227,8 @@ pub fn current_context() -> Option<LogContext> {
 
 /// Returns the current authenticated user without exposing mutable shared state.
 pub fn current_logged_in_user() -> Option<JsonObject> {
-    current_context().and_then(|context| {
-        (!context.logged_in_user.is_empty()).then_some(context.logged_in_user)
-    })
+    current_context()
+        .and_then(|context| (!context.logged_in_user.is_empty()).then_some(context.logged_in_user))
 }
 
 pub fn apply_context(event: Event, context: &LogContext) -> Event {
@@ -246,7 +246,10 @@ pub fn apply_context(event: Event, context: &LogContext) -> Event {
         );
     }
     if !context.baggage.is_empty() {
-        fields.insert("otel.baggage".into(), Value::Object(context.baggage.clone()));
+        fields.insert(
+            "otel.baggage".into(),
+            Value::Object(context.baggage.clone()),
+        );
     }
 
     let mut event = event.add_fields(fields);

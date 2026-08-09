@@ -58,8 +58,7 @@ async fn spawned_task_propagation_is_explicit_and_isolated() {
     let observed = with_task_context(context("parent"), async {
         spawn_with_current_context(async {
             tokio::task::yield_now().await;
-            current_context()
-                .and_then(|value| value.logged_in_user.get("id").cloned())
+            current_context().and_then(|value| value.logged_in_user.get("id").cloned())
         })
         .await
         .unwrap()

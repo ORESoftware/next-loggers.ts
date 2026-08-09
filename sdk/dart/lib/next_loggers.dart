@@ -10,13 +10,13 @@ enum LogLevel { trace, debug, info, warn, error, fatal }
 extension LogLevelWire on LogLevel {
   String get wire => name.toUpperCase();
   int get severityNumber => const <LogLevel, int>{
-        LogLevel.trace: 1,
-        LogLevel.debug: 5,
-        LogLevel.info: 9,
-        LogLevel.warn: 13,
-        LogLevel.error: 17,
-        LogLevel.fatal: 21,
-      }[this]!;
+    LogLevel.trace: 1,
+    LogLevel.debug: 5,
+    LogLevel.info: 9,
+    LogLevel.warn: 13,
+    LogLevel.error: 17,
+    LogLevel.fatal: 21,
+  }[this]!;
 
   int get otelSeverityNumber => severityNumber;
 }
@@ -53,22 +53,22 @@ class LogContext {
   final List<Object?> meta;
 
   LogContext copy() => LogContext(
-        loggedInUser: Map<String, Object?>.from(loggedInUser),
-        users: users
-            .map((value) => Map<String, Object?>.from(value))
-            .toList(growable: false),
-        fields: Map<String, Object?>.from(fields),
-        traceId: traceId,
-        traceIds: List<String>.from(traceIds),
-        spanId: spanId,
-        traceFlags: traceFlags,
-        traceState: traceState,
-        baggage: Map<String, String>.from(baggage),
-        routineId: routineId,
-        tags: List<String>.from(tags),
-        context: List<Object?>.from(context),
-        meta: List<Object?>.from(meta),
-      );
+    loggedInUser: Map<String, Object?>.from(loggedInUser),
+    users: users
+        .map((value) => Map<String, Object?>.from(value))
+        .toList(growable: false),
+    fields: Map<String, Object?>.from(fields),
+    traceId: traceId,
+    traceIds: List<String>.from(traceIds),
+    spanId: spanId,
+    traceFlags: traceFlags,
+    traceState: traceState,
+    baggage: Map<String, String>.from(baggage),
+    routineId: routineId,
+    tags: List<String>.from(tags),
+    context: List<Object?>.from(context),
+    meta: List<Object?>.from(meta),
+  );
 
   LogContext merge(LogContext patch) {
     final traces = <String>[];
@@ -95,16 +95,14 @@ class LogContext {
     }
 
     return LogContext(
-      loggedInUser: <String, Object?>{
-        ...loggedInUser,
-        ...patch.loggedInUser,
-      },
+      loggedInUser: <String, Object?>{...loggedInUser, ...patch.loggedInUser},
       users: <Map<String, Object?>>[
         ...users.map(Map<String, Object?>.from),
         ...patch.users.map(Map<String, Object?>.from),
       ],
       fields: <String, Object?>{...fields, ...patch.fields},
-      traceId: patch.traceId ?? traceId ?? (traces.isEmpty ? null : traces.first),
+      traceId:
+          patch.traceId ?? traceId ?? (traces.isEmpty ? null : traces.first),
       traceIds: traces,
       spanId: patch.spanId ?? spanId,
       traceFlags: patch.traceFlags ?? traceFlags,
@@ -150,17 +148,14 @@ FutureOr<T> withLogContext<T>(
   final value = parent == null ? context.copy() : parent.merge(context);
   return runZoned<FutureOr<T>>(
     callback,
-    zoneValues: <Object?, Object?>{
-      _logContextZoneKey: _LogContextFrame(value),
-    },
+    zoneValues: <Object?, Object?>{_logContextZoneKey: _LogContextFrame(value)},
   );
 }
 
 FutureOr<T> runWithLogContext<T>(
   LogContext context,
   FutureOr<T> Function() callback,
-) =>
-    withLogContext(context, callback);
+) => withLogContext(context, callback);
 
 /// Mutates only the current Zone frame. Returns false outside a context scope.
 bool updateLogContext(LogContext patch) {
@@ -172,9 +167,8 @@ bool updateLogContext(LogContext patch) {
   return true;
 }
 
-bool setContextLoggedInUser(Map<String, Object?> user) => updateLogContext(
-      LogContext(loggedInUser: Map<String, Object?>.from(user)),
-    );
+bool setContextLoggedInUser(Map<String, Object?> user) =>
+    updateLogContext(LogContext(loggedInUser: Map<String, Object?>.from(user)));
 
 typedef RecordSender = FutureOr<void> Function(Map<String, Object?> record);
 
@@ -205,11 +199,11 @@ class Logger {
     List<LogTransport> transports = const <LogTransport>[],
     String Function()? idFactory,
     String Function()? clock,
-  })  : fields = Map<String, Object?>.from(fields),
-        loggedInUser = Map<String, Object?>.from(loggedInUser),
-        transports = List<LogTransport>.unmodifiable(transports),
-        idFactory = idFactory ?? _defaultId,
-        clock = clock ?? (() => DateTime.now().toUtc().toIso8601String());
+  }) : fields = Map<String, Object?>.from(fields),
+       loggedInUser = Map<String, Object?>.from(loggedInUser),
+       transports = List<LogTransport>.unmodifiable(transports),
+       idFactory = idFactory ?? _defaultId,
+       clock = clock ?? (() => DateTime.now().toUtc().toIso8601String());
 
   final String appName;
   final String? name;
@@ -236,29 +230,25 @@ class Logger {
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) =>
-      log(LogLevel.trace, message, fields: fields, values: values);
+  }) => log(LogLevel.trace, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> debug(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) =>
-      log(LogLevel.debug, message, fields: fields, values: values);
+  }) => log(LogLevel.debug, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> info(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) =>
-      log(LogLevel.info, message, fields: fields, values: values);
+  }) => log(LogLevel.info, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> warn(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) =>
-      log(LogLevel.warn, message, fields: fields, values: values);
+  }) => log(LogLevel.warn, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> error(
     String message, {
@@ -266,15 +256,16 @@ class Logger {
     List<Object?> values = const <Object?>[],
     Object? error,
     StackTrace? stackTrace,
-  }) =>
-      log(
-        LogLevel.error,
-        message,
-        fields: fields,
-        values: values,
-        errors: error == null ? const <Object?>[] : <Object?>[error],
-        stackTrace: stackTrace == null ? const <String>[] : <String>[stackTrace.toString()],
-      );
+  }) => log(
+    LogLevel.error,
+    message,
+    fields: fields,
+    values: values,
+    errors: error == null ? const <Object?>[] : <Object?>[error],
+    stackTrace: stackTrace == null
+        ? const <String>[]
+        : <String>[stackTrace.toString()],
+  );
 
   Future<Map<String, Object?>> fatal(
     String message, {
@@ -282,15 +273,16 @@ class Logger {
     List<Object?> values = const <Object?>[],
     Object? error,
     StackTrace? stackTrace,
-  }) =>
-      log(
-        LogLevel.fatal,
-        message,
-        fields: fields,
-        values: values,
-        errors: error == null ? const <Object?>[] : <Object?>[error],
-        stackTrace: stackTrace == null ? const <String>[] : <String>[stackTrace.toString()],
-      );
+  }) => log(
+    LogLevel.fatal,
+    message,
+    fields: fields,
+    values: values,
+    errors: error == null ? const <Object?>[] : <Object?>[error],
+    stackTrace: stackTrace == null
+        ? const <String>[]
+        : <String>[stackTrace.toString()],
+  );
 
   Future<Map<String, Object?>> log(
     LogLevel level,
@@ -334,7 +326,9 @@ class Logger {
         mergedFields['otel.trace_state'] = ambient.traceState;
       }
       if (ambient.baggage.isNotEmpty) {
-        mergedFields['otel.baggage'] = Map<String, String>.from(ambient.baggage);
+        mergedFields['otel.baggage'] = Map<String, String>.from(
+          ambient.baggage,
+        );
       }
     }
 
@@ -416,8 +410,9 @@ class Logger {
   Future<void> flushOnExit() async {
     for (final transport in transports) {
       if (transport is ExitFlushableLogTransport) {
-        await (transport as ExitFlushableLogTransport)
-            .flushOnExit(const <Map<String, Object?>>[]);
+        await (transport as ExitFlushableLogTransport).flushOnExit(
+          const <Map<String, Object?>>[],
+        );
       }
     }
     await flush();
@@ -447,7 +442,8 @@ class OpenTelemetryTransport implements LogTransport {
       (value) => value.wire == record['level'],
     );
     final fields = Map<String, Object?>.from(
-      (record['fields'] as Map?)?.cast<String, Object?>() ?? const <String, Object?>{},
+      (record['fields'] as Map?)?.cast<String, Object?>() ??
+          const <String, Object?>{},
     );
     final attributes = <String, Object?>{
       'service.name': record['appName'],
@@ -455,7 +451,8 @@ class OpenTelemetryTransport implements LogTransport {
       'next_logger.runtime': record['runtime'],
       'log.record.uid': record['id'],
       if (record['traceId'] != null) 'trace.id': record['traceId'],
-      for (final entry in fields.entries) 'next_logger.field.${entry.key}': entry.value,
+      for (final entry in fields.entries)
+        'next_logger.field.${entry.key}': entry.value,
     };
     return emit(<String, Object?>{
       'body': record['message'],
@@ -473,7 +470,8 @@ class SupabaseTransport implements LogTransport {
   final FutureOr<void> Function(Map<String, Object?> record) insert;
 
   @override
-  FutureOr<void> write(Map<String, Object?> record) => insert(_recordCopy(record));
+  FutureOr<void> write(Map<String, Object?> record) =>
+      insert(_recordCopy(record));
 }
 
 class MemoryTransport
@@ -508,20 +506,17 @@ class MemoryTransport
 String _defaultId() {
   final random = Random.secure();
   final timestamp = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
-  final suffix = List<int>.generate(8, (_) => random.nextInt(256))
-      .map((value) => value.toRadixString(16).padLeft(2, '0'))
-      .join();
+  final suffix = List<int>.generate(
+    8,
+    (_) => random.nextInt(256),
+  ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
   return 'dart-$timestamp-$suffix';
 }
 
 Object? _normalize(Object? value) =>
     _normalizeValue(value, 0, HashSet<Object>.identity());
 
-Object? _normalizeValue(
-  Object? value,
-  int depth,
-  Set<Object> ancestors,
-) {
+Object? _normalizeValue(Object? value, int depth, Set<Object> ancestors) {
   if (depth > 12) {
     return '[Truncated: max depth]';
   }
@@ -541,8 +536,11 @@ Object? _normalizeValue(
     try {
       final result = <String, Object?>{};
       for (final entry in value.entries.take(200)) {
-        result[entry.key.toString()] =
-            _normalizeValue(entry.value, depth + 1, ancestors);
+        result[entry.key.toString()] = _normalizeValue(
+          entry.value,
+          depth + 1,
+          ancestors,
+        );
       }
       if (value.length > 200) {
         result['[Truncated]'] = '${value.length - 200} properties omitted';

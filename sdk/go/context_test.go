@@ -113,7 +113,9 @@ func TestTraceFlagsPreserveExplicitZero(t *testing.T) {
 	if err := logger.InfoContext(cleared, "zero flags").Send(); err != nil {
 		t.Fatal(err)
 	}
-	if value, exists := transport.Records[0].Fields["otel.trace_flags"]; !exists || value != byte(0) {
+	value, exists := transport.Records[0].Fields["otel.trace_flags"]
+	traceFlags, numeric := value.(float64)
+	if !exists || !numeric || traceFlags != 0 {
 		t.Fatalf("explicit zero trace flags missing from record: %#v", transport.Records[0].Fields)
 	}
 }

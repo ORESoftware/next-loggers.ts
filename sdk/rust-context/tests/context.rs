@@ -24,10 +24,7 @@ fn nested_thread_context_restores_after_scope_and_unwind() {
                 ..LogContext::default()
             });
             assert_eq!(
-                current_thread_context()
-                    .unwrap()
-                    .logged_in_user
-                    .get("id"),
+                current_thread_context().unwrap().logged_in_user.get("id"),
                 Some(&json!("inner"))
             );
             panic!("boom");
@@ -91,9 +88,15 @@ fn context_applies_user_trace_span_and_routine() {
         .info_context(&context, vec![json!("hello")])
         .to_record()
         .unwrap();
-    assert_eq!(record.logged_in_user.unwrap().get("id"), Some(&json!("user-1")));
+    assert_eq!(
+        record.logged_in_user.unwrap().get("id"),
+        Some(&json!("user-1"))
+    );
     assert_eq!(record.trace_id.as_deref(), Some("trace-1"));
-    assert_eq!(record.trace_ids, vec!["trace-1".to_string(), "trace-2".to_string()]);
+    assert_eq!(
+        record.trace_ids,
+        vec!["trace-1".to_string(), "trace-2".to_string()]
+    );
     assert_eq!(record.fields.get("otel.span_id"), Some(&json!("span-1")));
     assert_eq!(record.routine_id.as_deref(), Some("handler"));
 }
@@ -127,11 +130,20 @@ fn thread_context_isolated_across_workers() {
 #[test]
 fn shutdown_state_requires_explicit_force_escalation() {
     let mut state = ShutdownState::new(true);
-    assert_eq!(state.trigger(ShutdownCause::Sigint), ShutdownAction::BeginGraceful);
+    assert_eq!(
+        state.trigger(ShutdownCause::Sigint),
+        ShutdownAction::BeginGraceful
+    );
     assert_eq!(state.phase(), ShutdownPhase::Draining);
-    assert_eq!(state.trigger(ShutdownCause::StdinEof), ShutdownAction::Force);
+    assert_eq!(
+        state.trigger(ShutdownCause::StdinEof),
+        ShutdownAction::Force
+    );
     assert_eq!(state.phase(), ShutdownPhase::Forced);
-    assert_eq!(state.trigger(ShutdownCause::Sigterm), ShutdownAction::Ignore);
+    assert_eq!(
+        state.trigger(ShutdownCause::Sigterm),
+        ShutdownAction::Ignore
+    );
 }
 
 #[test]

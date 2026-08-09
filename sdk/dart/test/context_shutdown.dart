@@ -37,29 +37,24 @@ Future<void> main() async {
 
   await withLogContext(
     const LogContext(traceFlags: 1),
-    () => withLogContext(
-      const LogContext(traceFlags: 0),
-      () {
-        assert(currentLogContext?.traceFlags == 0);
-      },
-    ),
+    () => withLogContext(const LogContext(traceFlags: 0), () {
+      assert(currentLogContext?.traceFlags == 0);
+    }),
   );
 
   final traces = await Future.wait(<Future<String>>[
-    Future<String>(() => withLogContext(
-          const LogContext(traceId: 'a'),
-          () async {
-            await Future<void>.delayed(Duration.zero);
-            return (await logger.info('a'))['traceId']! as String;
-          },
-        )),
-    Future<String>(() => withLogContext(
-          const LogContext(traceId: 'b'),
-          () async {
-            await Future<void>.delayed(Duration.zero);
-            return (await logger.info('b'))['traceId']! as String;
-          },
-        )),
+    Future<String>(
+      () => withLogContext(const LogContext(traceId: 'a'), () async {
+        await Future<void>.delayed(Duration.zero);
+        return (await logger.info('a'))['traceId']! as String;
+      }),
+    ),
+    Future<String>(
+      () => withLogContext(const LogContext(traceId: 'b'), () async {
+        await Future<void>.delayed(Duration.zero);
+        return (await logger.info('b'))['traceId']! as String;
+      }),
+    ),
   ]);
   assert(traces[0] == 'a' && traces[1] == 'b');
 
@@ -70,22 +65,24 @@ Future<void> main() async {
   final flushRelease = Completer<void>();
   var forced = 0;
   var flushCalls = 0;
-  final shutdown = installProcessShutdown(ProcessShutdownOptions(
-    interactive: true,
-    events: signalEvents.stream,
-    stdinEofEvents: eofEvents.stream,
-    timeout: const Duration(seconds: 5),
-    forceTimeout: const Duration(seconds: 1),
-    graceful: (_) => graceful.future,
-    force: (_) {
-      forced += 1;
-    },
-    flush: (_) async {
-      flushCalls += 1;
-      if (!flushStarted.isCompleted) flushStarted.complete();
-      await flushRelease.future;
-    },
-  ));
+  final shutdown = installProcessShutdown(
+    ProcessShutdownOptions(
+      interactive: true,
+      events: signalEvents.stream,
+      stdinEofEvents: eofEvents.stream,
+      timeout: const Duration(seconds: 5),
+      forceTimeout: const Duration(seconds: 1),
+      graceful: (_) => graceful.future,
+      force: (_) {
+        forced += 1;
+      },
+      flush: (_) async {
+        flushCalls += 1;
+        if (!flushStarted.isCompleted) flushStarted.complete();
+        await flushRelease.future;
+      },
+    ),
+  );
 
   signalEvents.add(ShutdownCause.sigint);
   await Future<void>.delayed(Duration.zero);
@@ -108,16 +105,18 @@ Future<void> main() async {
 
   final blockedSignals = StreamController<ShutdownCause>();
   final blocked = Completer<void>();
-  final bounded = installProcessShutdown(ProcessShutdownOptions(
-    interactive: true,
-    events: blockedSignals.stream,
-    watchStdinEof: false,
-    timeout: const Duration(seconds: 1),
-    forceTimeout: const Duration(milliseconds: 5),
-    graceful: (_) => blocked.future,
-    force: (_) => blocked.future,
-    flush: (_) => blocked.future,
-  ));
+  final bounded = installProcessShutdown(
+    ProcessShutdownOptions(
+      interactive: true,
+      events: blockedSignals.stream,
+      watchStdinEof: false,
+      timeout: const Duration(seconds: 1),
+      forceTimeout: const Duration(milliseconds: 5),
+      graceful: (_) => blocked.future,
+      force: (_) => blocked.future,
+      flush: (_) => blocked.future,
+    ),
+  );
   blockedSignals.add(ShutdownCause.sigint);
   await Future<void>.delayed(Duration.zero);
   blockedSignals.add(ShutdownCause.sigint);
