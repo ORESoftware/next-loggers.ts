@@ -1,0 +1,36 @@
+name: Gleam formatter probe
+
+on:
+  pull_request:
+    paths:
+      - "sdk/gleam/**"
+      - ".github/workflows/gleam-format-probe.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gleam-format-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19.0"
+          gleam-version: "1.17.0"
+      - name: Print exact formatter diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sdk/gleam
+          gleam format src test
+          git diff -- src test
+          test -z "$(git status --porcelain -- src test)"
