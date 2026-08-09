@@ -27,12 +27,7 @@ pub type Action {
 }
 
 pub type State {
-  State(
-    phase: Phase,
-    interactive: Bool,
-    signal_count: Int,
-    eof_armed: Bool,
-  )
+  State(phase: Phase, interactive: Bool, signal_count: Int, eof_armed: Bool)
 }
 
 pub fn new(interactive: Bool) -> State {
@@ -94,10 +89,7 @@ pub fn trigger(state: State, cause: Cause) -> #(State, Action) {
     )
     Draining, StdinEof ->
       case state.interactive && state.eof_armed {
-        True -> #(
-          State(..state, phase: Forced, eof_armed: False),
-          Force,
-        )
+        True -> #(State(..state, phase: Forced, eof_armed: False), Force)
         False -> #(state, Ignore)
       }
     Draining, Timeout | Draining, Programmatic -> #(
@@ -111,10 +103,7 @@ pub fn trigger(state: State, cause: Cause) -> #(State, Action) {
 
 pub fn mark_closed(state: State) -> #(State, Bool) {
   case state.phase {
-    Draining -> #(
-      State(..state, phase: Closed, eof_armed: False),
-      True,
-    )
+    Draining -> #(State(..state, phase: Closed, eof_armed: False), True)
     _ -> #(state, False)
   }
 }
