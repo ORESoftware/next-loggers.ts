@@ -284,7 +284,7 @@ jobs:
           python -m pip install --disable-pip-version-check jsonschema==4.26.0 referencing==0.37.0
           python scripts/validate-contracts.py
 {native}      - name: Record exact source
-        run: printf '%s %s %s %s\n' {shlex.quote(repository['name'])} {shlex.quote(language)} "${{{{ matrix.role }}}}" "${{{{ matrix.ref }}}}"
+        run: echo {shlex.quote(repository['name'])} {shlex.quote(language)} "${{{{ matrix.role }}}}" "${{{{ matrix.ref }}}}"
 '''
 
 
