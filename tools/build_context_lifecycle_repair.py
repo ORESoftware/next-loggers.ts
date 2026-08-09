@@ -31,28 +31,44 @@ def repair_dart() -> None:
     path = Path("sdk/dart/lib/next_loggers.dart")
     text = path.read_text()
 
-    text, flush_count = re.subn(
+    text = re.sub(
         r"(?m)^(\s*)await transport\.flush\(\);$",
         r"\1final flushable = transport as FlushableLogTransport;\n\1await flushable.flush();",
         text,
     )
-    text, exit_count = re.subn(
+    text = re.sub(
         r"(?m)^(\s*)await transport\.flushOnExit\(([^\n]*)\);$",
         r"\1final exitFlushable = transport as ExitFlushableLogTransport;\n\1await exitFlushable.flushOnExit(\2);",
         text,
     )
-    text, close_count = re.subn(
+    text = re.sub(
         r"(?m)^(\s*)await transport\.close\(\);$",
         r"\1final closable = transport as ClosableLogTransport;\n\1await closable.close();",
         text,
     )
 
-    if flush_count not in (1, 2):
-        raise RuntimeError(f"unexpected Dart flush replacement count: {flush_count}")
-    if exit_count != 1:
-        raise RuntimeError(f"unexpected Dart exit-flush replacement count: {exit_count}")
-    if close_count != 1:
-        raise RuntimeError(f"unexpected Dart close replacement count: {close_count}")
+    flush_repaired = (
+        "final flushable = transport as FlushableLogTransport;" in text
+        or "transport as FlushableLogTransport).flush()" in text
+    )
+    exit_repaired = (
+        "final exitFlushable = transport as ExitFlushableLogTransport;" in text
+        or (
+            "transport as ExitFlushableLogTransport" in text
+            and ".flushOnExit(" in text
+        )
+    )
+    close_repaired = (
+        "final closable = transport as ClosableLogTransport;" in text
+        or "transport as ClosableLogTransport).close()" in text
+    )
+
+    if not flush_repaired:
+        raise RuntimeError("Dart flush dispatch is not in an expected repaired state")
+    if not exit_repaired:
+        raise RuntimeError("Dart exit-flush dispatch is not in an expected repaired state")
+    if not close_repaired:
+        raise RuntimeError("Dart close dispatch is not in an expected repaired state")
 
     path.write_text(text)
 
