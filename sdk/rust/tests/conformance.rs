@@ -160,3 +160,68 @@ fn explicit_opentelemetry_and_supabase_transports_work() {
     assert_eq!(supabase[0].schema, "next-loggers/v1");
     assert_eq!(supabase[0].message, "payment failed");
 }
+
+#[test]
+fn per_event_opentelemetry_routing_preserves_regular_transports() {
+    let otel = Arc::new(Mutex::new(Vec::<OpenTelemetryLogRecord>::new()));
+    let otel_sink = otel.clone();
+    let regular = Arc::new(MemoryTransport::default());
+    let logger = Logger::new(Options {
+        otel: false,
+        console: false,
+        transports: vec![
+            Arc::new(OpenTelemetryTransport::new(move |record| {
+                otel_sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+            regular.clone() as Arc<dyn Transport>,
+        ],
+        ..Options::default()
+    });
+
+    let default_off = logger.info(vec![json!("default-off")]);
+    assert!(!default_off.is_otel_enabled(logger.is_otel_enabled()));
+    default_off.send().unwrap();
+    logger
+        .info(vec![json!("forced-on")])
+        .use_otel()
+        .send()
+        .unwrap();
+    logger
+        .info(vec![json!("reset-off")])
+        .use_otel()
+        .reset_otel()
+        .send()
+        .unwrap();
+    logger.use_otel();
+    logger
+        .warn(vec![json!("forced-off")])
+        .not_otel()
+        .send()
+        .unwrap();
+    logger
+        .info(vec![json!("logger-on")])
+        .with_otel(true)
+        .send()
+        .unwrap();
+
+    let otel = otel.lock().unwrap();
+    assert_eq!(otel.len(), 2);
+    assert_eq!(otel[0].body, "forced-on");
+    assert_eq!(otel[1].body, "logger-on");
+    drop(otel);
+    assert_eq!(
+        regular
+            .records()
+            .into_iter()
+            .map(|record| record.message)
+            .collect::<Vec<_>>(),
+        [
+            "default-off",
+            "forced-on",
+            "reset-off",
+            "forced-off",
+            "logger-on"
+        ]
+    );
+}

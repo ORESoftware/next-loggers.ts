@@ -110,6 +110,15 @@ impl From<serde_json::Error> for LoggerError {
 pub trait Transport: Send + Sync {
     fn write(&self, record: &LogRecord) -> Result<(), LoggerError>;
 
+    fn is_otel(&self) -> bool {
+        self.name()
+            .is_some_and(|name| name.eq_ignore_ascii_case("opentelemetry"))
+    }
+
+    fn name(&self) -> Option<&str> {
+        None
+    }
+
     fn flush(&self) -> Result<(), LoggerError> {
         Ok(())
     }
@@ -152,6 +161,14 @@ impl OpenTelemetryTransport {
 }
 
 impl Transport for OpenTelemetryTransport {
+    fn is_otel(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> Option<&str> {
+        Some("opentelemetry")
+    }
+
     fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
         let mut attributes = JsonObject::from_iter([
             (
@@ -295,6 +312,7 @@ pub struct Options {
     pub fields: JsonObject,
     pub logged_in_user: JsonObject,
     pub transports: Vec<Arc<dyn Transport>>,
+    pub otel: bool,
     pub console: bool,
     pub id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     pub clock: Arc<dyn Fn() -> String + Send + Sync>,
@@ -310,6 +328,7 @@ impl Default for Options {
             fields: JsonObject::new(),
             logged_in_user: JsonObject::new(),
             transports: Vec::new(),
+            otel: true,
             console: true,
             id_factory: Arc::new(default_id),
             clock: Arc::new(default_clock),
@@ -352,6 +371,7 @@ struct LoggerInner {
     fields: Mutex<JsonObject>,
     current_user: Mutex<JsonObject>,
     transports: Vec<Arc<dyn Transport>>,
+    otel: AtomicBool,
     console: bool,
     id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
@@ -371,6 +391,7 @@ impl Logger {
                 fields: Mutex::new(options.fields),
                 current_user: Mutex::new(options.logged_in_user),
                 transports: options.transports,
+                otel: AtomicBool::new(options.otel),
                 console: options.console,
                 id_factory: options.id_factory,
                 clock: options.clock,
@@ -446,6 +467,23 @@ impl Logger {
         self
     }
 
+    pub fn set_otel_enabled(&self, enabled: bool) -> &Self {
+        self.inner.otel.store(enabled, Ordering::Release);
+        self
+    }
+
+    pub fn use_otel(&self) -> &Self {
+        self.set_otel_enabled(true)
+    }
+
+    pub fn not_otel(&self) -> &Self {
+        self.set_otel_enabled(false)
+    }
+
+    pub fn is_otel_enabled(&self) -> bool {
+        self.inner.otel.load(Ordering::Acquire)
+    }
+
     fn emit(&self, event: &Event, store: bool) -> Result<Option<LogRecord>, LoggerError> {
         self.inner
             .unsent
@@ -468,7 +506,11 @@ impl Logger {
             );
         }
         if store {
+            let otel_enabled = event.is_otel_enabled(self.is_otel_enabled());
             for transport in &self.inner.transports {
+                if transport.is_otel() && !otel_enabled {
+                    continue;
+                }
                 transport.write(&record)?;
             }
         }
@@ -543,6 +585,7 @@ struct EventState {
     meta: Vec<Value>,
     errors: Vec<Value>,
     stack_trace: Vec<String>,
+    otel_enabled: Option<bool>,
     sent: bool,
     record: Option<LogRecord>,
 }
@@ -563,6 +606,7 @@ impl EventState {
             meta: Vec::new(),
             errors: Vec::new(),
             stack_trace: Vec::new(),
+            otel_enabled: None,
             sent: false,
             record: None,
         }
@@ -583,6 +627,38 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 }
 
 impl Event {
+    pub fn with_otel(self, enabled: bool) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .otel_enabled = Some(enabled);
+        self
+    }
+
+    pub fn use_otel(self) -> Self {
+        self.with_otel(true)
+    }
+
+    pub fn not_otel(self) -> Self {
+        self.with_otel(false)
+    }
+
+    pub fn reset_otel(self) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .otel_enabled = None;
+        self
+    }
+
+    pub fn is_otel_enabled(&self, fallback: bool) -> bool {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .otel_enabled
+            .unwrap_or(fallback)
+    }
+
     pub fn add_fields(self, fields: JsonObject) -> Self {
         self.state
             .lock()

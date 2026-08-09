@@ -10,13 +10,13 @@ enum LogLevel { trace, debug, info, warn, error, fatal }
 extension LogLevelWire on LogLevel {
   String get wire => name.toUpperCase();
   int get severityNumber => const <LogLevel, int>{
-    LogLevel.trace: 1,
-    LogLevel.debug: 5,
-    LogLevel.info: 9,
-    LogLevel.warn: 13,
-    LogLevel.error: 17,
-    LogLevel.fatal: 21,
-  }[this]!;
+        LogLevel.trace: 1,
+        LogLevel.debug: 5,
+        LogLevel.info: 9,
+        LogLevel.warn: 13,
+        LogLevel.error: 17,
+        LogLevel.fatal: 21,
+      }[this]!;
 
   int get otelSeverityNumber => severityNumber;
 }
@@ -53,22 +53,22 @@ class LogContext {
   final List<Object?> meta;
 
   LogContext copy() => LogContext(
-    loggedInUser: Map<String, Object?>.from(loggedInUser),
-    users: users
-        .map((value) => Map<String, Object?>.from(value))
-        .toList(growable: false),
-    fields: Map<String, Object?>.from(fields),
-    traceId: traceId,
-    traceIds: List<String>.from(traceIds),
-    spanId: spanId,
-    traceFlags: traceFlags,
-    traceState: traceState,
-    baggage: Map<String, String>.from(baggage),
-    routineId: routineId,
-    tags: List<String>.from(tags),
-    context: List<Object?>.from(context),
-    meta: List<Object?>.from(meta),
-  );
+        loggedInUser: Map<String, Object?>.from(loggedInUser),
+        users: users
+            .map((value) => Map<String, Object?>.from(value))
+            .toList(growable: false),
+        fields: Map<String, Object?>.from(fields),
+        traceId: traceId,
+        traceIds: List<String>.from(traceIds),
+        spanId: spanId,
+        traceFlags: traceFlags,
+        traceState: traceState,
+        baggage: Map<String, String>.from(baggage),
+        routineId: routineId,
+        tags: List<String>.from(tags),
+        context: List<Object?>.from(context),
+        meta: List<Object?>.from(meta),
+      );
 
   LogContext merge(LogContext patch) {
     final traces = <String>[];
@@ -155,7 +155,8 @@ FutureOr<T> withLogContext<T>(
 FutureOr<T> runWithLogContext<T>(
   LogContext context,
   FutureOr<T> Function() callback,
-) => withLogContext(context, callback);
+) =>
+    withLogContext(context, callback);
 
 /// Mutates only the current Zone frame. Returns false outside a context scope.
 bool updateLogContext(LogContext patch) {
@@ -188,6 +189,58 @@ abstract interface class ClosableLogTransport {
   FutureOr<void> close();
 }
 
+bool _isOtelTransport(LogTransport transport) {
+  if (transport is OpenTelemetryTransport) return true;
+  try {
+    final dynamic candidate = transport;
+    return candidate.otel == true ||
+        candidate.name?.toString().toLowerCase() == 'opentelemetry';
+  } on Object {
+    return false;
+  }
+}
+
+class LogEvent {
+  LogEvent(
+    this.logger,
+    this.level,
+    this.message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    List<Object?> values = const <Object?>[],
+  })  : fields = Map<String, Object?>.from(fields),
+        values = List<Object?>.from(values);
+
+  final Logger logger;
+  final LogLevel level;
+  final String message;
+  final Map<String, Object?> fields;
+  final List<Object?> values;
+  bool? _otelEnabled;
+
+  LogEvent useOtel() => withOtel(true);
+  LogEvent notOtel() => withOtel(false);
+
+  LogEvent withOtel(bool enabled) {
+    _otelEnabled = enabled;
+    return this;
+  }
+
+  LogEvent resetOtel() {
+    _otelEnabled = null;
+    return this;
+  }
+
+  bool isOtelEnabled(bool fallback) => _otelEnabled ?? fallback;
+
+  Future<Map<String, Object?>> send() => logger.log(
+        level,
+        message,
+        fields: fields,
+        values: values,
+        otelEnabled: _otelEnabled,
+      );
+}
+
 class Logger {
   Logger({
     required this.appName,
@@ -197,13 +250,14 @@ class Logger {
     Map<String, Object?> fields = const <String, Object?>{},
     Map<String, Object?> loggedInUser = const <String, Object?>{},
     List<LogTransport> transports = const <LogTransport>[],
+    this.otel = true,
     String Function()? idFactory,
     String Function()? clock,
-  }) : fields = Map<String, Object?>.from(fields),
-       loggedInUser = Map<String, Object?>.from(loggedInUser),
-       transports = List<LogTransport>.unmodifiable(transports),
-       idFactory = idFactory ?? _defaultId,
-       clock = clock ?? (() => DateTime.now().toUtc().toIso8601String());
+  })  : fields = Map<String, Object?>.from(fields),
+        loggedInUser = Map<String, Object?>.from(loggedInUser),
+        transports = List<LogTransport>.unmodifiable(transports),
+        idFactory = idFactory ?? _defaultId,
+        clock = clock ?? (() => DateTime.now().toUtc().toIso8601String());
 
   final String appName;
   final String? name;
@@ -212,6 +266,7 @@ class Logger {
   final Map<String, Object?> fields;
   final Map<String, Object?> loggedInUser;
   final List<LogTransport> transports;
+  bool otel;
   final String Function() idFactory;
   final String Function() clock;
   bool _closed = false;
@@ -226,29 +281,50 @@ class Logger {
     return this;
   }
 
+  Logger setOtelEnabled(bool enabled) {
+    otel = enabled;
+    return this;
+  }
+
+  Logger useOtel() => setOtelEnabled(true);
+  Logger notOtel() => setOtelEnabled(false);
+  bool isOtelEnabled() => otel;
+
+  LogEvent event(
+    LogLevel level,
+    String message, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    List<Object?> values = const <Object?>[],
+  }) =>
+      LogEvent(this, level, message, fields: fields, values: values);
+
   Future<Map<String, Object?>> trace(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.trace, message, fields: fields, values: values);
+  }) =>
+      log(LogLevel.trace, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> debug(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.debug, message, fields: fields, values: values);
+  }) =>
+      log(LogLevel.debug, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> info(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.info, message, fields: fields, values: values);
+  }) =>
+      log(LogLevel.info, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> warn(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.warn, message, fields: fields, values: values);
+  }) =>
+      log(LogLevel.warn, message, fields: fields, values: values);
 
   Future<Map<String, Object?>> error(
     String message, {
@@ -256,16 +332,17 @@ class Logger {
     List<Object?> values = const <Object?>[],
     Object? error,
     StackTrace? stackTrace,
-  }) => log(
-    LogLevel.error,
-    message,
-    fields: fields,
-    values: values,
-    errors: error == null ? const <Object?>[] : <Object?>[error],
-    stackTrace: stackTrace == null
-        ? const <String>[]
-        : <String>[stackTrace.toString()],
-  );
+  }) =>
+      log(
+        LogLevel.error,
+        message,
+        fields: fields,
+        values: values,
+        errors: error == null ? const <Object?>[] : <Object?>[error],
+        stackTrace: stackTrace == null
+            ? const <String>[]
+            : <String>[stackTrace.toString()],
+      );
 
   Future<Map<String, Object?>> fatal(
     String message, {
@@ -273,16 +350,17 @@ class Logger {
     List<Object?> values = const <Object?>[],
     Object? error,
     StackTrace? stackTrace,
-  }) => log(
-    LogLevel.fatal,
-    message,
-    fields: fields,
-    values: values,
-    errors: error == null ? const <Object?>[] : <Object?>[error],
-    stackTrace: stackTrace == null
-        ? const <String>[]
-        : <String>[stackTrace.toString()],
-  );
+  }) =>
+      log(
+        LogLevel.fatal,
+        message,
+        fields: fields,
+        values: values,
+        errors: error == null ? const <Object?>[] : <Object?>[error],
+        stackTrace: stackTrace == null
+            ? const <String>[]
+            : <String>[stackTrace.toString()],
+      );
 
   Future<Map<String, Object?>> log(
     LogLevel level,
@@ -300,6 +378,7 @@ class Logger {
     List<Object?> meta = const <Object?>[],
     List<Object?> errors = const <Object?>[],
     List<String> stackTrace = const <String>[],
+    bool? otelEnabled,
   }) async {
     if (appName.trim().isEmpty) {
       throw ArgumentError.value(appName, 'appName', 'must not be empty');
@@ -393,6 +472,9 @@ class Logger {
 
     if (level.index >= minimumLevel.index) {
       for (final transport in transports) {
+        if (_isOtelTransport(transport) && !(otelEnabled ?? otel)) {
+          continue;
+        }
         await transport.write(_recordCopy(record));
       }
     }
@@ -435,6 +517,8 @@ class Logger {
 class OpenTelemetryTransport implements LogTransport {
   OpenTelemetryTransport(this.emit);
   final FutureOr<void> Function(Map<String, Object?> record) emit;
+  bool get otel => true;
+  String get name => 'opentelemetry';
 
   @override
   FutureOr<void> write(Map<String, Object?> record) {

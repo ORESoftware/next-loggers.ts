@@ -58,5 +58,36 @@ Future<void> main() async {
   assert(traces[0] == 'trace-a');
   assert(traces[1] == 'trace-b');
 
+  final routedOtel = <Map<String, Object?>>[];
+  final regular = MemoryTransport();
+  final routedLogger = Logger(
+    appName: 'routing',
+    otel: false,
+    transports: <LogTransport>[
+      OpenTelemetryTransport(routedOtel.add),
+      regular,
+    ],
+  );
+  final defaultOff = routedLogger.event(LogLevel.info, 'default-off');
+  assert(!defaultOff.isOtelEnabled(routedLogger.isOtelEnabled()));
+  await defaultOff.send();
+  await routedLogger.event(LogLevel.info, 'forced-on').useOtel().send();
+  await routedLogger
+      .event(LogLevel.info, 'reset-off')
+      .useOtel()
+      .resetOtel()
+      .send();
+  routedLogger.useOtel();
+  await routedLogger.event(LogLevel.warn, 'forced-off').notOtel().send();
+  await routedLogger.event(LogLevel.info, 'logger-on').withOtel(true).send();
+  assert(
+    routedOtel.map((record) => record['body']).toList().join(',') ==
+        'forced-on,logger-on',
+  );
+  assert(
+    regular.records.map((record) => record['message']).toList().join(',') ==
+        'default-off,forced-on,reset-off,forced-off,logger-on',
+  );
+
   print('Dart/Flutter next-loggers conformance passed');
 }
