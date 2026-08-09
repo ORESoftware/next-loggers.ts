@@ -1,0 +1,78 @@
+name: Merge main and validate context reconciliation
+
+on: push
+
+permissions:
+  contents: write
+
+jobs:
+  merge-main:
+    if: github.ref_name == 'agent/polyglot-context-shutdown-20260808'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge main with reviewed conflict resolutions
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin main
+
+          set +e
+          git merge --no-ff --no-commit origin/main
+          merge_status=$?
+          set -e
+
+          if [ "$merge_status" -ne 0 ]; then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U | sort)
+            printf 'merge conflicts:\n'
+            printf '  %s\n' "${conflicts[@]}"
+
+            allowed=(
+              sdk/go/context.go
+              sdk/go/context_logger.go
+              sdk/go/context_test.go
+              sdk/nodejs/package.json
+            )
+
+            for conflict in "${conflicts[@]}"; do
+              accepted=false
+              for path in "${allowed[@]}"; do
+                if [ "$conflict" = "$path" ]; then
+                  accepted=true
+                  break
+                fi
+              done
+              if [ "$accepted" != true ]; then
+                echo "unexpected merge conflict: $conflict" >&2
+                exit 1
+              fi
+              git checkout --ours -- "$conflict"
+              git add -- "$conflict"
+            done
+          fi
+
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo 'unresolved merge conflicts remain' >&2
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+
+      - name: Format and validate reconciled Go SDK
+        run: |
+          set -euo pipefail
+          gofmt -w sdk/go/context.go sdk/go/context_logger.go sdk/go/context_test.go
+          git add sdk/go/context.go sdk/go/context_logger.go sdk/go/context_test.go
+          (cd sdk/go && go test ./...)
+          node -e "JSON.parse(require('node:fs').readFileSync('sdk/nodejs/package.json', 'utf8'))"
+          git diff --check
+
+      - name: Commit and push merge
+        run: |
+          set -euo pipefail
+          git commit -m 'Merge main and reconcile Go execution context APIs'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
