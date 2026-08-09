@@ -50,16 +50,16 @@
     }
   },
   "context": {
-    "status": "partial",
+    "status": "implemented",
     "strategy": "contextvars",
     "propagation": "async",
     "isolation": "concurrent-safe",
     "symbols": {
-      "run": ["run_with_log_context"],
+      "run": ["run_with_log_context", "run_with_log_context_async", "log_context"],
       "current": ["get_log_context"],
-      "update": ["update_log_context"],
-      "apply": ["apply_log_context"],
-      "withSpan": ["with_span"]
+      "update": ["update_log_context", "merge_log_context"],
+      "apply": ["apply_log_context", "ContextLogger"],
+      "withSpan": ["with_span", "with_span_async"]
     },
     "mergesLoggedInUser": true,
     "mergesFields": true,
@@ -68,14 +68,14 @@
   },
   "telemetry": {
     "opentelemetry": {
-      "adapterSymbols": ["OpenTelemetryTransport", "OtelTransport"],
+      "adapterSymbols": ["OpenTelemetryTransport", "OtelTransport", "with_span", "with_span_async"],
       "explicit": true,
       "automaticInstrumentation": false,
       "monkeyPatching": false,
       "ownsProvider": false,
       "wrapsLoggerCalls": true,
-      "sampledOutCorrelation": false,
-      "recordingSpanEventsOnly": false
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
     },
     "supabase": {
       "adapterSymbols": ["SupabaseTransport"],
@@ -90,17 +90,18 @@
     "recordFixture": "contracts/fixtures/conformance-record.json",
     "sourceFiles": [
       "sdk/python/src/next_loggers/__init__.py",
-      "sdk/python/tests/test_conformance.py"
+      "sdk/python/src/next_loggers/context.py",
+      "sdk/python/tests/test_conformance.py",
+      "sdk/python/tests/test_context.py"
     ],
     "validatesJsonSchema": false,
-    "testsContextIsolation": false,
-    "testsNoMonkeyPatching": false
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": true
   },
   "promotion": {
     "ready": false,
     "blockers": [
-      "Add contextvars-backed context API and concurrent task isolation tests.",
-      "Validate emitted fixtures against the canonical JSON Schema."
+      "Validate Python-emitted records directly against the canonical JSON Schema before package promotion."
     ]
   }
 }

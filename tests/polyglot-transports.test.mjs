@@ -23,8 +23,17 @@ const contracts = [
   },
   {
     name: 'Rust',
-    sources: ['sdk/rust/src/lib.rs'],
-    tests: ['sdk/rust/tests/conformance.rs'],
+    sources: [
+      'sdk/rust/src/lib.rs',
+      'sdk/rust/src/core.rs',
+      'sdk/rust/src/context.rs',
+      'sdk/rust/src/span.rs',
+    ],
+    tests: [
+      'sdk/rust/tests/conformance.rs',
+      'sdk/rust/tests/context.rs',
+      'sdk/rust/tests/span.rs',
+    ],
     markers: ['OpenTelemetryTransport', 'SupabaseTransport'],
   },
   {
