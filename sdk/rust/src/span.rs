@@ -27,11 +27,8 @@ pub trait Span: Send + Sync {
 
 /// Structural adapter implemented around an application-owned OTEL tracer.
 pub trait Tracer: Send + Sync {
-    fn start_span(
-        &self,
-        name: &str,
-        attributes: &JsonObject,
-    ) -> Result<Arc<dyn Span>, LoggerError>;
+    fn start_span(&self, name: &str, attributes: &JsonObject)
+        -> Result<Arc<dyn Span>, LoggerError>;
 }
 
 struct NoopSpan;
@@ -233,13 +230,9 @@ struct SpanEndGuard {
 
 impl Drop for SpanEndGuard {
     fn drop(&mut self) {
-        safe_span_call(
-            &self.logger,
-            &self.context,
-            "end span",
-            &self.name,
-            || self.span.end(),
-        );
+        safe_span_call(&self.logger, &self.context, "end span", &self.name, || {
+            self.span.end()
+        });
     }
 }
 
