@@ -62,6 +62,20 @@ def ensure_repo(repository: str, description: str, visibility: str, *, apply: bo
     run(command, apply=apply)
 
 
+def existing_file_sha(repository: str, path: str, *, apply: bool) -> str | None:
+    if not apply:
+        return None
+    result = subprocess.run(
+        ["gh", "api", f"repos/{repository}/contents/{path}", "--jq", ".sha"],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
 def put_file(repository: str, path: str, content: str, message: str, *, apply: bool) -> None:
     encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
     command = [
@@ -70,6 +84,9 @@ def put_file(repository: str, path: str, content: str, message: str, *, apply: b
         "-f", f"message={message}",
         "-f", f"content={encoded}",
     ]
+    sha = existing_file_sha(repository, path, apply=apply)
+    if sha:
+        command.extend(["-f", f"sha={sha}"])
     run(command, apply=apply)
 
 
@@ -124,7 +141,7 @@ jobs:
       - run: python scripts/validate-contracts.py
         working-directory: source
       - name: Record tested source
-        run: printf '%s %s %s %s\n' {shlex.quote(repository['name'])} {shlex.quote(language)} "${{{{ matrix.role }}}}" "${{{{ matrix.ref }}}}"
+        run: echo {shlex.quote(repository['name'])} {shlex.quote(language)} "${{{{ matrix.role }}}}" "${{{{ matrix.ref }}}}"
 '''
 
 
@@ -141,13 +158,34 @@ def mirror_history(*, apply: bool) -> None:
     if not apply:
         print(f"DRY-RUN: gh repo clone {LEGACY} <temporary>/legacy.git -- --mirror")
         print(f"DRY-RUN: git -C <temporary>/legacy.git remote add canonical https://github.com/{CANONICAL}.git")
+        print("DRY-RUN: remove provider-owned and temporary relay refs")
         print("DRY-RUN: git -C <temporary>/legacy.git push --mirror canonical")
         return
     with tempfile.TemporaryDirectory(prefix="ores-otel-mirror-") as directory:
         mirror = Path(directory) / "legacy.git"
         run(["gh", "repo", "clone", LEGACY, str(mirror), "--", "--mirror"], apply=True)
+        refs = subprocess.run(
+            [
+                "git", "-C", str(mirror), "for-each-ref", "--format=%(refname)",
+                "refs/pull", "refs/remotes", "refs/merge-requests",
+                "refs/heads/agent/pat-publication-relay-",
+            ],
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.splitlines()
+        for ref in refs:
+            if ref:
+                run(["git", "-C", str(mirror), "update-ref", "-d", ref], apply=True)
         run(["git", "-C", str(mirror), "remote", "add", "canonical", f"https://github.com/{CANONICAL}.git"], apply=True)
         run(["git", "-C", str(mirror), "push", "--mirror", "canonical"], apply=True)
+        run(
+            [
+                "gh", "api", "--method", "PATCH", f"repos/{CANONICAL}",
+                "-f", "default_branch=main", "-F", "has_wiki=false",
+            ],
+            apply=True,
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -202,6 +240,7 @@ def main() -> int:
 
     print("No token argument is accepted. Authentication must come from a pre-authenticated gh CLI or GitHub App.")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
