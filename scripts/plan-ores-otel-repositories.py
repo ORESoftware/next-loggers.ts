@@ -64,12 +64,24 @@ def ensure_repo(repository: str, description: str, visibility: str, *, apply: bo
 
 def put_file(repository: str, path: str, content: str, message: str, *, apply: bool) -> None:
     encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    existing_sha: str | None = None
+    if apply:
+        existing = subprocess.run(
+            ["gh", "api", f"repos/{repository}/contents/{path}", "--jq", ".sha"],
+            text=True,
+            capture_output=True,
+        )
+        if existing.returncode == 0:
+            existing_sha = existing.stdout.strip() or None
+
     command = [
         "gh", "api", "--method", "PUT",
         f"repos/{repository}/contents/{path}",
         "-f", f"message={message}",
         "-f", f"content={encoded}",
     ]
+    if existing_sha:
+        command.extend(["-f", f"sha={existing_sha}"])
     run(command, apply=apply)
 
 
