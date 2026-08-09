@@ -3,7 +3,7 @@ name: Build validated context lifecycle repair
 on: push
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format:
@@ -52,6 +52,29 @@ jobs:
           )
           git diff --check
           git diff --stat
+
+      - name: Commit validated source repairs
+        if: github.ref_name == 'agent/polyglot-context-shutdown-20260808'
+        run: |
+          set -euo pipefail
+          paths=(
+            sdk/go/context_test.go
+            sdk/rust-context/src/lib.rs
+            sdk/rust-context/tests/context.rs
+            sdk/rust-context/tests/tokio_context.rs
+            sdk/dart/lib/next_loggers.dart
+            sdk/dart/lib/shutdown.dart
+            sdk/dart/test/context_shutdown.dart
+          )
+          git add -- "${paths[@]}"
+          if git diff --cached --quiet; then
+            echo 'Validated sources are already canonical.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(polyglot): apply validated context lifecycle repairs'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Upload validated source files
         uses: actions/upload-artifact@v4
