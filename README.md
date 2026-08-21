@@ -579,6 +579,18 @@ const log = createNodeLogger({ appName: 'web', after });
 
 Every transport promise is also tracked in the exported `pendingLogPromises` registry, analogous to a focused `dd-proms.ts`. `waitForPendingLogs()` drains writes across logger instances.
 
+## Detect events that never send
+
+An event is delivered only after its terminal send call. The repository ships the same missing-send diagnostic in every primary development path:
+
+```sh
+next-loggers lint src test
+go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint@latest ./...
+next-loggers-lint .
+```
+
+The JavaScript/TypeScript CLI uses the flags-2-env variables `NEXT_LOGGER_CLI_LINT_LOGGER_NAMES` and `NEXT_LOGGER_CLI_LINT_ALL`; the existing `next-loggers/require-send` ESLint rule remains the editor path. Python also exposes a flake8 `NL1` extension, and Rust marks `Event` as `#[must_use]`, so an ignored event is visible to the compiler.
+
 ## Shutdown delivery
 
 Runtime loggers install coordinated lifecycle drains by default:
