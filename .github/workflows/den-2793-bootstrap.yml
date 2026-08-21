@@ -1,0 +1,88 @@
+name: DEN-2793 one-shot reconstruction
+
+on:
+  push:
+    branches:
+      - agent/den-2793-missing-send-diagnostics
+    paths:
+      - .github/workflows/den-2793-bootstrap.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-2793-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  reconstruct:
+    name: Reconstruct, test and publish the lost working tree
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the recovery branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply the fail-closed reconstruction
+        run: |
+          python3 scripts/den2793-bootstrap.py
+          test ! -e scripts/den2793-bootstrap.py
+          test ! -e .github/workflows/den-2793-bootstrap.yml
+          test -e .github/workflows/den-2793-missing-send.yml
+
+      - name: Format and validate JavaScript and TypeScript
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          node dist/cli/main.js flags --check
+
+      - name: Validate the Zed package contract
+        run: |
+          test -s .zpkg.toml
+          test -s .zpkg.lock
+          ZED_PKG_TEST_TARGET="$PWD" sh ./.zpkg-smoke.sh
+
+      - name: Format and test Go
+        working-directory: sdk/go
+        run: |
+          gofmt -w cmd/nextloggerslint/main.go cmd/nextloggerslint/main_test.go
+          go test ./...
+
+      - name: Test Python and the flake8 contract
+        working-directory: sdk/python
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m compileall -q src/next_loggers/lint.py
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 -m next_loggers.lint tests/test_lint.py
+
+      - name: Format and test Rust
+        run: |
+          cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
+          cargo test --manifest-path sdk/rust/Cargo.toml
+
+      - name: Commit the verified reconstruction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --check
+          if git diff --cached | grep -E '(ghp_[A-Za-z0-9]{20,}|lin_api_[A-Za-z0-9]{20,})'; then
+            echo 'credential-shaped text detected in staged recovery changes' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(DEN-2793): add missing-send diagnostics across runtimes'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
