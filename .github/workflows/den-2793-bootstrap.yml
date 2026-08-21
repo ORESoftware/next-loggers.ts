@@ -6,12 +6,14 @@ on:
       - agent/den-2793-missing-send-diagnostics
     paths:
       - .github/workflows/den-2793-bootstrap.yml
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 concurrency:
-  group: den-2793-bootstrap
+  group: den-2793-bootstrap-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -19,10 +21,13 @@ jobs:
     name: Reconstruct, test and publish the lost working tree
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      TARGET_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
     steps:
       - name: Check out the recovery branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ env.TARGET_BRANCH }}
           persist-credentials: true
           fetch-depth: 0
 
@@ -85,4 +90,4 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'feat(DEN-2793): add missing-send diagnostics across runtimes'
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "HEAD:${TARGET_BRANCH}"
