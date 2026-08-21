@@ -13,9 +13,22 @@ The TypeScript CLI remains dependency-free at runtime: [`src/cli/spec.ts`](../sr
 | `resolve` | Resolve the package export map for Node, Bun, Deno, browsers, edge-light, and workerd conditions. |
 | `pretty` | Render or filter `next-loggers/v1` NDJSON from standard input. |
 | `packages` | List every independently publishable Zed/native package, render its immutable tag, and optionally detect release-metadata drift. |
+| `lint` | Report standalone next-loggers event chains that never call `.send()`. |
 | `flags` | Print the command/flag/environment contract or compare `.cli-flags.toml` with the compiled specification. |
 
 Run `next-loggers --help` or `next-loggers <command> --help` for the complete generated option table.
+
+## Missing-send diagnostics
+
+`next-loggers lint [paths...]` recursively checks JavaScript and TypeScript source files for standalone event chains that never terminate with `.send()` or `.sendWithStore()`. By default it checks files importing `@oresoftware/next-loggers`; `--all` checks every supported source file, and repeatable `--logger-name` values add project-specific logger variables or property paths.
+
+```sh
+next-loggers lint src test
+next-loggers lint --logger-name audit --logger-name request.log services
+NEXT_LOGGER_CLI_LINT_ALL=true next-loggers lint .
+```
+
+Findings use the stable `NL100` code and return exit status 1. Unreadable or invalid paths return 2. The equivalent native analyzers are `go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint@latest ./...` and the Python `next-loggers-lint` console script / flake8 `NL1` extension.
 
 ## Release-package catalog
 

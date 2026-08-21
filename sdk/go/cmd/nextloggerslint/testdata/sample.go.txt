@@ -1,0 +1,8 @@
+package sample
+
+func run(logger Logger) {
+	logger.Info("missing send").AddFields(nil)
+	logger.Warn("delivered").Send()
+	event := logger.Debug("assigned for later")
+	_ = event
+}
