@@ -12,7 +12,7 @@ test('flags a standalone event chain that never sends', () => {
   const findings = lintSource(`${imported}\nlog.info('started').withTag('boot');\n`, 'sample.ts');
   assert.equal(findings.length, 1);
   assert.equal(findings[0].code, 'NL100');
-  assert.equal(findings[0].line, 4);
+  assert.equal(findings[0].line, 5);
 });
 
 test('accepts send and sendWithStore terminal calls', () => {
