@@ -1,9 +1,9 @@
 import type {
   LogContextProvider,
   LogLevel,
+  LoggerOptions,
   LogRecord,
   LogTransport,
-  LoggerOptions,
   SerializedValue,
 } from './base-logger.js';
 
@@ -465,7 +465,6 @@ export function createOpenTelemetryContextProvider(
  */
 export class OpenTelemetryTransport implements LogTransport {
   readonly name = 'opentelemetry';
-  /** Lets per-event useOtel()/notOtel() route around this transport. */
   readonly otel = true;
 
   constructor(private readonly options: OpenTelemetryTransportOptions) {
@@ -568,63 +567,31 @@ export function createOpenTelemetryTransport(
   return new OpenTelemetryTransport(options);
 }
 
-export interface OpenTelemetryBridgeOptions extends OpenTelemetryTransportOptions {
-  /**
-   * Default routing for the OTEL transport. Defaults to true; pass false to
-   * make OpenTelemetry opt-in, so only `logger.info(...).useOtel().send()`
-   * reaches it. Either way `useOtel()` / `notOtel()` on the event wins.
-   */
-  otel?: boolean;
-  /**
-   * Installs a context provider so trace/span ids from the active span land on
-   * every record. Defaults to true when `activeSpan` is supplied.
-   */
-  correlate?: boolean;
-  requireRecordingSpan?: boolean;
-}
-
 /**
- * Wraps logger options with the OTEL transport and (by default) span
- * correlation, so any runtime factory can be given the bridge in one call:
- *
- * ```ts
- * const logger = createNodeLogger(withOpenTelemetry(
- *   { appName: 'payments' },
- *   { logger: logs.getLogger('payments'), activeSpan, otel: false },
- * ));
- * logger.info('charged').useOtel().send();
- * ```
- *
- * Existing transports and an explicitly supplied contextProvider are kept.
+ * Add the explicit OpenTelemetry bridge without replacing existing transports
+ * or an application-supplied context provider. When `activeSpan` is present,
+ * span correlation is installed automatically unless the caller already chose
+ * a provider.
  */
-export function withOpenTelemetry<TOptions extends LoggerOptions>(
-  loggerOptions: TOptions,
-  bridge: OpenTelemetryBridgeOptions,
-): TOptions {
-  const existing = loggerOptions.transports;
-  const transports: LogTransport[] = existing
-    ? Array.isArray(existing)
-      ? [...existing]
-      : [existing]
+export function withOpenTelemetry(
+  loggerOptions: LoggerOptions,
+  bridge: OpenTelemetryTransportOptions,
+): LoggerOptions {
+  const existing = loggerOptions.transports
+    ? Array.isArray(loggerOptions.transports)
+      ? loggerOptions.transports
+      : [loggerOptions.transports]
     : [];
-  transports.push(new OpenTelemetryTransport(bridge));
-
-  const correlate = bridge.correlate ?? Boolean(bridge.activeSpan);
-  const contextProvider: LogContextProvider | undefined =
+  const contextProvider =
     loggerOptions.contextProvider ??
-    (correlate && bridge.activeSpan
+    (bridge.activeSpan
       ? createOpenTelemetryContextProvider(bridge.activeSpan, {
-          ...(bridge.requireRecordingSpan === undefined
-            ? {}
-            : { requireRecordingSpan: bridge.requireRecordingSpan }),
           ...(bridge.onBridgeError ? { onBridgeError: bridge.onBridgeError } : {}),
         })
       : undefined);
-
   return {
     ...loggerOptions,
-    transports,
+    transports: [...existing, createOpenTelemetryTransport(bridge)],
     ...(contextProvider ? { contextProvider } : {}),
-    ...(bridge.otel === undefined ? {} : { otel: bridge.otel }),
   };
 }

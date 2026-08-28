@@ -291,121 +291,32 @@ test('provider lookup failures and diagnostic failures never escape into applica
   assert.deepEqual(diagnostics, [['active-span', 'context manager unavailable']]);
 });
 
-test('useOtel()/notOtel() route individual events around OTEL transports', async () => {
+test('withOpenTelemetry preserves transports and explicit context while installing correlation by default', async () => {
   const emitted = [];
-  const other = [];
-  const logger = createLogger({
-    console: false,
-    transports: [
-      createOpenTelemetryTransport({ logger: { emit: (entry) => void emitted.push(entry) } }),
-      { name: 'memory', write: (entry) => void other.push(entry) },
-    ],
-  });
-
-  await logger.info('default on').send();
-  await logger.warn('opted out').notOtel().send();
-  await logger.error('opted in').useOtel().send();
-
-  assert.deepEqual(
-    emitted.map((entry) => entry.body),
-    ['default on', 'opted in'],
-  );
-  assert.deepEqual(
-    other.map((entry) => entry.message),
-    ['default on', 'opted out', 'opted in'],
-  );
-});
-
-test('otel:false makes OpenTelemetry opt-in per event and resetOtel() restores the default', async () => {
-  const emitted = [];
-  const logger = createLogger({
-    console: false,
-    otel: false,
-    transports: createOpenTelemetryTransport({
-      logger: { emit: (entry) => void emitted.push(entry) },
+  const regular = [];
+  const explicitContext = () => ({ fields: { source: 'explicit' } });
+  const bridge = {
+    logger: { emit: (value) => emitted.push(value) },
+    activeSpan: () => ({
+      spanContext: () => ({ traceId: TRACE_ID, spanId: SPAN_ID, traceFlags: 1 }),
+      addEvent() {},
     }),
-  });
-
-  await logger.info('skipped').send();
-  await logger.info('selected').useOtel().send();
-  await logger.info('reverted').useOtel().resetOtel().send();
-  assert.deepEqual(
-    emitted.map((entry) => entry.body),
-    ['selected'],
-  );
-
-  logger.useOtel();
-  await logger.info('now on by default').send();
-  assert.equal(logger.isOtelEnabled(), true);
-  assert.equal(emitted.at(-1).body, 'now on by default');
-
-  logger.notOtel();
-  await logger.info('off again').send();
-  assert.equal(emitted.length, 2);
-
-  // anew() children inherit the logger-level default.
-  const child = logger.anew({ appName: 'child' });
-  await child.info('child default off').send();
-  await child.info('child opted in').useOtel().send();
-  assert.deepEqual(
-    emitted.map((entry) => entry.body),
-    ['selected', 'now on by default', 'child opted in'],
-  );
-});
-
-test('notOtel() suppresses span events and metrics, not the other transports', async () => {
-  const events = [];
-  const metrics = [];
-  const delivered = [];
-  const span = {
-    spanContext: () => ({ traceId: TRACE_ID, spanId: SPAN_ID, traceFlags: 1 }),
-    isRecording: () => true,
-    addEvent: (name) => void events.push(name),
   };
-  const logger = createLogger({
-    console: false,
-    transports: [
-      createOpenTelemetryTransport({
-        logger: { emit() {} },
-        activeSpan: () => span,
-        recordMetric: (name) => void metrics.push(name),
-      }),
-      { write: (record) => void delivered.push(record.message) },
-    ],
-  });
-
-  await logger.error('kept local').notOtel().send();
-  assert.deepEqual(events, []);
-  assert.deepEqual(metrics, []);
-  assert.deepEqual(delivered, ['kept local']);
-});
-
-test('withOpenTelemetry() wires transport, correlation, and default routing in one call', async () => {
-  const emitted = [];
-  const span = {
-    spanContext: () => ({ traceId: TRACE_ID, spanId: SPAN_ID, traceFlags: 1 }),
-    isRecording: () => false,
-    addEvent() {},
-  };
-  const memory = [];
-  const logger = createLogger(
-    withOpenTelemetry(
-      { console: false, appName: 'payments', transports: { write: (r) => void memory.push(r) } },
-      {
-        logger: { emit: (entry) => void emitted.push(entry) },
-        activeSpan: () => span,
-        otel: false,
-      },
-    ),
+  const options = withOpenTelemetry(
+    {
+      appName: 'helper',
+      console: false,
+      contextProvider: explicitContext,
+      transports: { name: 'memory', write: (value) => regular.push(value) },
+    },
+    bridge,
   );
+  assert.equal(options.contextProvider, explicitContext);
+  assert.equal(options.transports.length, 2);
+  await createLogger(options).info('helper-event').send();
+  assert.equal(regular.length, 1);
+  assert.equal(emitted.length, 1);
 
-  await logger.info('correlated but not exported').send();
-  await logger.info('exported').useOtel().send();
-
-  assert.equal(memory[0].traceId, TRACE_ID);
-  assert.equal(memory[0].fields[OTEL_FIELD_KEYS.spanId], SPAN_ID);
-  assert.deepEqual(
-    emitted.map((entry) => entry.body),
-    ['exported'],
-  );
+  const correlated = withOpenTelemetry({ console: false }, bridge);
+  assert.equal(correlated.contextProvider().traceId, TRACE_ID);
 });

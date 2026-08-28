@@ -88,6 +88,14 @@ type Transport interface {
 	Write(LogRecord) error
 }
 
+type OpenTelemetryMarker interface {
+	IsOpenTelemetry() bool
+}
+
+type NamedTransport interface {
+	TransportName() string
+}
+
 type Flusher interface {
 	Flush() error
 }
@@ -98,18 +106,6 @@ type ExitFlusher interface {
 
 type Closer interface {
 	Close() error
-}
-
-// OtelTransport marks a transport as an OpenTelemetry bridge so per-event
-// UseOtel/NotOtel can route around it. OpenTelemetryTransport implements it;
-// a hand-rolled OTEL transport should too.
-type OtelTransport interface {
-	IsOtel() bool
-}
-
-func isOtelTransport(transport Transport) bool {
-	marker, ok := transport.(OtelTransport)
-	return ok && marker.IsOtel()
 }
 
 type MemoryTransport struct {
@@ -173,8 +169,8 @@ func NewOpenTelemetryTransport(emit OpenTelemetryEmitter) *OpenTelemetryTranspor
 	return &OpenTelemetryTransport{Emit: emit}
 }
 
-// IsOtel lets Event.NotOtel skip this transport.
-func (transport *OpenTelemetryTransport) IsOtel() bool { return true }
+func (transport *OpenTelemetryTransport) IsOpenTelemetry() bool { return true }
+func (transport *OpenTelemetryTransport) TransportName() string { return "opentelemetry" }
 
 func (transport *OpenTelemetryTransport) Write(record LogRecord) error {
 	if transport == nil || transport.Emit == nil {
@@ -228,14 +224,11 @@ type Options struct {
 	Fields       map[string]any
 	LoggedInUser map[string]any
 	Transports   []Transport
+	Otel         *bool
 	Console      bool
 	Output       io.Writer
 	IDFactory    func() string
 	Clock        func() string
-	// Otel is the default routing for OTEL transports. nil means enabled;
-	// point it at false to make OpenTelemetry opt-in, so only events calling
-	// UseOtel() reach OTEL transports.
-	Otel *bool
 }
 
 type Logger struct {
@@ -246,14 +239,12 @@ type Logger struct {
 	Fields        map[string]any
 	CurrentUser   map[string]any
 	Transports    []Transport
+	OtelEnabled   bool
 	Console       bool
 	Output        io.Writer
 	IDFactory     func() string
 	Clock         func() string
 	RuntimeFields func() map[string]any
-	// OtelEnabled is the default routing for OTEL transports when an event
-	// makes no choice of its own. Defaults to true.
-	OtelEnabled bool
 
 	mu     sync.Mutex
 	unsent map[*Event]struct{}
@@ -281,6 +272,10 @@ func NewLogger(options Options) *Logger {
 			return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		}
 	}
+	otelEnabled := true
+	if options.Otel != nil {
+		otelEnabled = *options.Otel
+	}
 	return &Logger{
 		AppName:       options.AppName,
 		Name:          options.Name,
@@ -289,12 +284,12 @@ func NewLogger(options Options) *Logger {
 		Fields:        cloneMap(options.Fields),
 		CurrentUser:   cloneMap(options.LoggedInUser),
 		Transports:    append([]Transport(nil), options.Transports...),
+		OtelEnabled:   otelEnabled,
 		Console:       options.Console,
 		Output:        options.Output,
 		IDFactory:     options.IDFactory,
 		Clock:         options.Clock,
 		RuntimeFields: func() map[string]any { return nil },
-		OtelEnabled:   options.Otel == nil || *options.Otel,
 		unsent:        make(map[*Event]struct{}),
 	}
 }
@@ -372,10 +367,10 @@ type Event struct {
 	Context      []any
 	Meta         []any
 	StackTrace   []string
+	OtelEnabled  *bool
 
 	mu     sync.Mutex
 	sent   bool
-	otel   *bool
 	record *LogRecord
 }
 
@@ -422,53 +417,20 @@ func (logger *Logger) SetCurrentUser(user map[string]any) *Logger {
 	return logger
 }
 
-// UseOtel on a Logger sends every record to OTEL transports unless the event
-// calls NotOtel.
-func (logger *Logger) UseOtel() *Logger { return logger.WithOtel(true) }
-
-// NotOtel on a Logger makes OpenTelemetry opt-in: only events calling UseOtel
-// reach OTEL transports.
-func (logger *Logger) NotOtel() *Logger { return logger.WithOtel(false) }
-
-func (logger *Logger) WithOtel(enabled bool) *Logger {
+func (logger *Logger) SetOtelEnabled(enabled bool) *Logger {
 	logger.mu.Lock()
 	defer logger.mu.Unlock()
 	logger.OtelEnabled = enabled
 	return logger
 }
 
-// UseOtel forces this record onto OTEL transports, even when the logger opts
-// out by default.
-func (event *Event) UseOtel() *Event { return event.WithOtel(true) }
+func (logger *Logger) UseOtel() *Logger { return logger.SetOtelEnabled(true) }
+func (logger *Logger) NotOtel() *Logger { return logger.SetOtelEnabled(false) }
 
-// NotOtel keeps this record off OTEL transports; every other transport still
-// receives it.
-func (event *Event) NotOtel() *Event { return event.WithOtel(false) }
-
-// WithOtel is the programmatic form of UseOtel/NotOtel.
-func (event *Event) WithOtel(enabled bool) *Event {
-	event.mu.Lock()
-	defer event.mu.Unlock()
-	event.otel = &enabled
-	return event
-}
-
-// ResetOtel drops the per-event choice so the logger default decides again.
-func (event *Event) ResetOtel() *Event {
-	event.mu.Lock()
-	defer event.mu.Unlock()
-	event.otel = nil
-	return event
-}
-
-// OtelEnabled resolves the per-event choice against the logger default.
-func (event *Event) OtelEnabled(fallback bool) bool {
-	event.mu.Lock()
-	defer event.mu.Unlock()
-	if event.otel == nil {
-		return fallback
-	}
-	return *event.otel
+func (logger *Logger) IsOtelEnabled() bool {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	return logger.OtelEnabled
 }
 
 func (event *Event) AddFields(fields map[string]any) *Event {
@@ -476,6 +438,43 @@ func (event *Event) AddFields(fields map[string]any) *Event {
 		event.Fields[key] = value
 	}
 	return event
+}
+
+func (event *Event) WithOtel(enabled bool) *Event {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	event.OtelEnabled = new(bool)
+	*event.OtelEnabled = enabled
+	return event
+}
+
+func (event *Event) UseOtel() *Event { return event.WithOtel(true) }
+func (event *Event) NotOtel() *Event { return event.WithOtel(false) }
+
+func (event *Event) ResetOtel() *Event {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	event.OtelEnabled = nil
+	return event
+}
+
+func (event *Event) IsOtelEnabled(fallback bool) bool {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	if event.OtelEnabled == nil {
+		return fallback
+	}
+	return *event.OtelEnabled
+}
+
+func isOpenTelemetryTransport(transport Transport) bool {
+	if marked, ok := transport.(OpenTelemetryMarker); ok && marked.IsOpenTelemetry() {
+		return true
+	}
+	if named, ok := transport.(NamedTransport); ok {
+		return strings.EqualFold(named.TransportName(), "opentelemetry")
+	}
+	return false
 }
 
 func appendUnique(values []string, value string) []string {
@@ -641,13 +640,9 @@ func (logger *Logger) emit(event *Event, store bool) error {
 	if !store {
 		return nil
 	}
-	logger.mu.Lock()
-	otelEnabled := logger.OtelEnabled
-	logger.mu.Unlock()
-	includeOtel := event.OtelEnabled(otelEnabled)
 	var failures []error
 	for _, transport := range logger.Transports {
-		if !includeOtel && isOtelTransport(transport) {
+		if isOpenTelemetryTransport(transport) && !event.IsOtelEnabled(logger.IsOtelEnabled()) {
 			continue
 		}
 		if err := transport.Write(record); err != nil {

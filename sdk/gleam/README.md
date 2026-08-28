@@ -41,30 +41,22 @@ let otel = logging.otel_transport(emit_to_otel)
 let supabase = logging.supabase_transport(send_to_supabase)
 ```
 
-## OpenTelemetry on or off, per event
+## Per-event OpenTelemetry routing
 
-`otel_transport` sets `is_otel: True` on the transport, so a single record can
-opt in or out of it inside the pipeline:
+`Options.otel` defaults to `True`. Set it to `False` for opt-in telemetry and
+override the event before `send`:
 
 ```gleam
-logging.info(logger, "charged", [])
-|> logging.use_otel
+let logger = logging.new(logging.Options(..options, otel: False), otel)
+logging.info(logger, "sampled in", [])
+|> logging.event_use_otel
 |> logging.send
-
-logging.warn(logger, "noisy poll", [])
-|> logging.not_otel
+logging.warn(logger, "OTEL excluded", [])
+|> logging.event_not_otel
 |> logging.send
 ```
 
-`Options.otel` sets the default events fall back to; `with_otel(event, bool)`
-takes a runtime flag and `reset_otel` returns an event to the default.
-
-## Missing `send`
-
-The compiler flags an unused `Result` from `send`, but not an event that is
-never piped into it. The polyglot checker covers that case, including `|>`
-pipelines:
-
-```sh
-npx next-loggers lint src/
-```
+`with_otel`, `reset_otel`, and `is_otel_enabled` provide the programmatic
+forms. `set_otel_enabled`, `use_otel`, and `not_otel` return a logger carrying
+the updated default. A `Transport` is treated as OTEL when `otel` is `True` or
+its name is `"opentelemetry"`; regular transports are never suppressed.

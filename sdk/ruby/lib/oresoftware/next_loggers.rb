@@ -77,11 +77,6 @@ module ORESoftware
         @sink = sink
       end
 
-      # Lets per-call otel: false routing skip this transport.
-      def otel?
-        true
-      end
-
       def write(record)
         attributes = {
           "service.name" => record.fetch("appName"),
@@ -104,6 +99,9 @@ module ORESoftware
           }.freeze
         )
       end
+
+      def otel? = true
+      def name = "opentelemetry"
     end
 
     # Client-safe Supabase transport; the application supplies its sender.
@@ -116,6 +114,39 @@ module ORESoftware
 
       def write(record)
         @sender.call(record)
+      end
+    end
+
+    class LogEvent
+      attr_reader :logger, :level, :message, :fields
+
+      def initialize(logger, level, message, fields = {})
+        @logger = logger
+        @level = level
+        @message = message
+        @fields = fields
+        @otel_enabled = nil
+      end
+
+      def use_otel = with_otel(true)
+      def not_otel = with_otel(false)
+
+      def with_otel(enabled)
+        @otel_enabled = !!enabled
+        self
+      end
+
+      def reset_otel
+        @otel_enabled = nil
+        self
+      end
+
+      def otel_enabled?(fallback)
+        @otel_enabled.nil? ? !!fallback : @otel_enabled
+      end
+
+      def send
+        logger.emit_event(self)
       end
     end
 
@@ -139,36 +170,31 @@ module ORESoftware
         @runtime = runtime.to_s.strip.empty? ? "ruby" : runtime.to_s
         @fields = stringify_keys(fields).freeze
         @transports = Array(transports).freeze
-        # Default routing for OTEL transports when a call says nothing.
-        @otel = otel ? true : false
+        @otel_enabled = !!otel
         @id_factory = id_factory
         @clock = clock
       end
 
-      attr_reader :otel
-
-      # Derived logger that sends every record to OTEL transports.
-      # Ruby level methods take a bare fields hash, so routing is chosen on the
-      # logger rather than as a keyword: `logger.use_otel.info("msg", id: 1)`.
-      def use_otel
-        with_otel(true)
-      end
-
-      # Derived logger that keeps records off OTEL transports; every other
-      # transport still receives them.
-      def not_otel
-        with_otel(false)
-      end
-
-      def with_otel(enabled)
-        derived = dup
-        derived.instance_variable_set(:@otel, enabled ? true : false)
-        derived
-      end
-
       def log(level, message, fields = {})
-        level_name = level.to_s.upcase
-        raise ArgumentError, "unsupported level: #{level}" unless LEVELS.include?(level_name)
+        event(level, message, fields).send
+      end
+
+      def event(level, message, fields = {})
+        LogEvent.new(self, level, message, fields)
+      end
+
+      def set_otel_enabled(enabled)
+        @otel_enabled = !!enabled
+        self
+      end
+
+      def use_otel = set_otel_enabled(true)
+      def not_otel = set_otel_enabled(false)
+      def otel_enabled? = @otel_enabled
+
+      def emit_event(event)
+        level_name = event.level.to_s.upcase
+        raise ArgumentError, "unsupported level: #{event.level}" unless LEVELS.include?(level_name)
 
         context = NextLoggers.current_context
         merged_fields = @fields.merge(context&.fields || {})
@@ -177,10 +203,10 @@ module ORESoftware
           merged_fields["otel.trace_flags"] = context.trace_flags
           merged_fields["otel.trace_state"] = context.trace_state unless blank?(context.trace_state)
         end
-        merged_fields.merge!(stringify_keys(fields))
+        merged_fields.merge!(stringify_keys(event.fields))
         merged_fields.freeze
 
-        text = message.to_s
+        text = event.message.to_s
         record = {
           "schema" => SCHEMA,
           "id" => @id_factory.call.to_s,
@@ -200,7 +226,11 @@ module ORESoftware
         record["tags"] = context.tags unless context.nil? || context.tags.empty?
         record.freeze
 
-        transports_for(@otel).each do |transport|
+        @transports.each do |transport|
+          name = transport.respond_to?(:name) ? transport.name.to_s.downcase : ""
+          is_otel = (transport.respond_to?(:otel?) && transport.otel?) || name == "opentelemetry"
+          next if is_otel && !event.otel_enabled?(@otel_enabled)
+
           if transport.respond_to?(:write)
             transport.write(record)
           elsif transport.respond_to?(:call)
@@ -219,16 +249,6 @@ module ORESoftware
       end
 
       private
-
-      def transports_for(include_otel)
-        return @transports if include_otel
-
-        @transports.reject { |transport| otel_transport?(transport) }
-      end
-
-      def otel_transport?(transport)
-        transport.respond_to?(:otel?) && transport.otel?
-      end
 
       def stringify_keys(value)
         raise ArgumentError, "fields must be a Hash" unless value.is_a?(Hash)

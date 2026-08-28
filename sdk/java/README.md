@@ -15,17 +15,20 @@ Maven coordinates:
 </dependency>
 ```
 
-## OpenTelemetry on or off
+## Per-event OpenTelemetry routing
 
-`OtelTransport` overrides `isOtel()` to `true`, so records can be routed around
-it without touching the OTEL SDK. `useOtel()` and `notOtel()` return a derived
-logger sharing the same transports:
+The existing logger constructors default OTEL routing to `true`; the overload
+with a final boolean configures an opt-in logger. Immediate `info`/`error`
+calls remain compatible, while `event` exposes the override chain:
 
 ```java
-logger.notOtel().warn("noisy poll", Map.of());  // other transports still receive it
-logger.useOtel().error("paged", Map.of());
+var log = new NextLoggers.Logger("app", null, "java", Map.of(), transports, false);
+log.event(NextLoggers.Level.INFO, "sampled in", Map.of()).useOtel().send();
+log.event(NextLoggers.Level.WARN, "OTEL excluded", Map.of()).notOtel().send();
+log.event(NextLoggers.Level.INFO, "computed", Map.of()).withOtel(routeToOtel).send();
 ```
 
-The `Logger(appName, name, runtime, fields, transports, otel)` constructor sets
-the default. Records are delivered as the call returns, so there is no
-unsent-event state to forget.
+`resetOtel()` restores the logger default and `isOtelEnabled(fallback)`
+resolves it. `setOtelEnabled`, `useOtel`, and `notOtel` update the logger
+default. Only transports whose `isOtel()` marker/name identifies
+OpenTelemetry are filtered.

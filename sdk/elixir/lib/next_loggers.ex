@@ -21,7 +21,6 @@ defmodule ORESoftware.NextLoggers do
       runtime: Keyword.get(opts, :runtime, "elixir"),
       fields: Map.new(Keyword.get(opts, :fields, %{})),
       transports: List.wrap(Keyword.get(opts, :transports, [])),
-      # Default routing for OTEL transports when a call makes no choice.
       otel: Keyword.get(opts, :otel, true),
       id_factory: Keyword.get(opts, :id_factory, &default_id/0),
       clock: Keyword.get(opts, :clock, &default_clock/0)
@@ -46,37 +45,51 @@ defmodule ORESoftware.NextLoggers do
     end
   end
 
-  @doc "Derived logger that delivers every record to OTEL transports (the default)."
-  def use_otel(logger) when is_map(logger), do: with_otel(logger, true)
-
-  @doc """
-  Derived logger that keeps records off OTEL transports; every other transport
-  still receives them: `logger |> ORESoftware.NextLoggers.not_otel() |> info("msg")`.
-  """
-  def not_otel(logger) when is_map(logger), do: with_otel(logger, false)
-
-  def with_otel(logger, enabled) when is_map(logger) and is_boolean(enabled),
-    do: Map.put(logger, :otel, enabled)
-
-  def otel_enabled(logger) when is_map(logger), do: Map.get(logger, :otel, true)
-
   def info(logger, message, fields \\ %{}), do: log(logger, "INFO", message, fields)
-  def warn(logger, message, fields \\ %{}), do: log(logger, "WARN", message, fields)
   def error(logger, message, fields \\ %{}), do: log(logger, "ERROR", message, fields)
 
   def log(logger, level, message, event_fields)
       when is_map(logger) and is_binary(level) and is_binary(message) and is_map(event_fields) do
-    log(logger, level, message, event_fields, otel_enabled(logger))
+    logger
+    |> event(level, message, event_fields)
+    |> send()
   end
 
-  @doc """
-  `otel` overrides this call's routing: `true` forces delivery to OTEL
-  transports, `false` skips them.
-  """
-  def log(logger, level, message, event_fields, otel)
-      when is_map(logger) and is_binary(level) and is_binary(message) and is_map(event_fields) and
-             is_boolean(otel) do
-    context = current_context()
+  def event(logger, level, message, event_fields \\ %{})
+      when is_map(logger) and is_binary(level) and is_binary(message) and is_map(event_fields) do
+    %{
+      kind: :event,
+      logger: logger,
+      level: level,
+      message: message,
+      fields: event_fields,
+      context: current_context(),
+      otel_enabled: nil
+    }
+  end
+
+  def set_otel_enabled(logger, enabled) when is_map(logger) and is_boolean(enabled),
+    do: Map.put(logger, :otel, enabled)
+
+  def use_otel(%{kind: :event} = event), do: with_otel(event, true)
+  def use_otel(logger) when is_map(logger), do: set_otel_enabled(logger, true)
+  def not_otel(%{kind: :event} = event), do: with_otel(event, false)
+  def not_otel(logger) when is_map(logger), do: set_otel_enabled(logger, false)
+
+  def with_otel(%{kind: :event} = event, enabled) when is_boolean(enabled),
+    do: Map.put(event, :otel_enabled, enabled)
+
+  def reset_otel(%{kind: :event} = event), do: Map.put(event, :otel_enabled, nil)
+
+  def is_otel_enabled(%{kind: :event, otel_enabled: nil}, fallback), do: !!fallback
+  def is_otel_enabled(%{kind: :event, otel_enabled: enabled}, _fallback), do: enabled
+
+  def send(%{kind: :event} = event) do
+    logger = event.logger
+    level = event.level
+    message = event.message
+    event_fields = event.fields
+    context = event.context
 
     fields =
       logger.fields
@@ -105,59 +118,60 @@ defmodule ORESoftware.NextLoggers do
       |> maybe_put_trace_ids(trace_id)
       |> maybe_put_tags(Map.get(context, :tags, []))
 
-    Enum.each(logger.transports, &deliver(&1, record, otel))
+    Enum.each(logger.transports, fn transport ->
+      unless otel_transport?(transport) and not is_otel_enabled(event, logger.otel) do
+        case deliver_transport(transport, record) do
+          :ok -> :ok
+          other -> raise "transport returned #{inspect(other)}"
+        end
+      end
+    end)
 
     record
   end
 
-  # otel_transport/1 returns a tagged transport so routing can skip it without
-  # inspecting the closure.
-  defp deliver({:otel, _sink}, _record, false), do: :ok
-  defp deliver({:otel, sink}, record, _otel) when is_function(sink, 1), do: call(sink, record)
-  defp deliver(sink, record, _otel) when is_function(sink, 1), do: call(sink, record)
-
-  defp call(sink, record) do
-    case sink.(record) do
-      :ok -> :ok
-      other -> raise "transport returned #{inspect(other)}"
-    end
-  end
-
   def otel_transport(sink) when is_function(sink, 1) do
-    {:otel,
-     fn record ->
-       attributes =
-         %{
-           "service.name" => record["appName"],
-           "next_logger.schema" => record["schema"],
-           "next_logger.runtime" => record["runtime"],
-           "log.record.uid" => record["id"]
-         }
-         |> put_optional("trace.id", record["traceId"])
-         |> Map.merge(
-           Map.new(record["fields"], fn {key, value} ->
-             {"next_logger.field.#{key}", value}
-           end)
-         )
+    {:opentelemetry, fn record ->
+      attributes =
+        %{
+          "service.name" => record["appName"],
+          "next_logger.schema" => record["schema"],
+          "next_logger.runtime" => record["runtime"],
+          "log.record.uid" => record["id"]
+        }
+        |> put_optional("trace.id", record["traceId"])
+        |> Map.merge(
+          Map.new(record["fields"], fn {key, value} ->
+            {"next_logger.field.#{key}", value}
+          end)
+        )
 
-       sink.(%{
-         "body" => record["message"],
-         "severityText" => record["level"],
-         "severityNumber" => severity_number(record["level"]),
-         "timestamp" => record["timestamp"],
-         "attributes" => attributes
-       })
+      sink.(%{
+        "body" => record["message"],
+        "severityText" => record["level"],
+        "severityNumber" => severity_number(record["level"]),
+        "timestamp" => record["timestamp"],
+        "attributes" => attributes
+      })
 
-       :ok
-     end}
+      :ok
+    end}
   end
 
   def supabase_transport(sender) when is_function(sender, 1) do
-    fn record ->
+    {:supabase, fn record ->
       sender.(record)
       :ok
-    end
+    end}
   end
+
+  defp otel_transport?({name, _transport}) when name in [:opentelemetry, "opentelemetry"], do: true
+  defp otel_transport?(_transport), do: false
+
+  defp deliver_transport({_name, transport}, record) when is_function(transport, 1),
+    do: transport.(record)
+
+  defp deliver_transport(transport, record) when is_function(transport, 1), do: transport.(record)
 
   defp maybe_put_trace_ids(map, nil), do: map
   defp maybe_put_trace_ids(map, ""), do: map

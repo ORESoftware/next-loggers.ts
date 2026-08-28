@@ -15,18 +15,18 @@ final record = await withLogContext(
 );
 ```
 
-## OpenTelemetry on or off, per call
+## Per-event OpenTelemetry routing
 
-`OpenTelemetryTransport` implements `OtelBridgeTransport`, so a record can skip
-it without touching the OTEL SDK:
+`Logger(otel: true)` is the default. Existing immediate methods remain
+unchanged; use `event` when a record needs an explicit OTEL decision:
 
 ```dart
-await logger.info('charged', otel: true);
-await logger.warn('noisy poll', otel: false);  // other transports still receive it
-await logger.notOtel().error('local only');    // derived logger
+final log = Logger(appName: 'app', otel: false, transports: transports);
+await log.event(LogLevel.info, 'sampled in').useOtel().send();
+await log.event(LogLevel.warn, 'OTEL excluded').notOtel().send();
+await log.event(LogLevel.info, 'computed').withOtel(routeToOtel).send();
 ```
 
-The `otel:` constructor argument sets the default; `useOtel()` / `notOtel()`
-return a derived logger. Delivery happens at the call, so there is no unsent
-event — but the call returns a `Future`, so enable the analyzer's
-`unawaited_futures` lint to catch one that is never awaited.
+`resetOtel()` restores the logger default and `isOtelEnabled(fallback)`
+resolves it. Logger `setOtelEnabled`, `useOtel`, and `notOtel` update the
+default. Other transports still receive records excluded from OTEL.

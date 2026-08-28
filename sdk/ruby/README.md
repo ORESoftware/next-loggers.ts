@@ -13,16 +13,18 @@ record = ORESoftware::NextLoggers.with_context(trace_id: "trace-1") do
 end
 ```
 
-## OpenTelemetry on or off
+## Per-event OpenTelemetry routing
 
-`OtelTransport` answers `otel? == true`, so records can be routed around it
-without touching the OTEL SDK. Ruby level methods take a bare fields hash, so
-the choice is made on the logger, which returns a derived instance:
+`otel: true` is the logger default. Immediate level calls stay compatible;
+use `event` for an explicit override chain:
 
 ```ruby
-logger.not_otel.warn("noisy poll", region: "us-east-1")  # other transports still receive it
-logger.use_otel.error("paged")
+log = ORESoftware::NextLoggers::Logger.new(app_name: "app", otel: false, transports: transports)
+log.event(:info, "sampled in").use_otel.send
+log.event(:warn, "OTEL excluded").not_otel.send
+log.event(:info, "computed").with_otel(route_to_otel).send
 ```
 
-Pass `otel: false` to `Logger.new` to make OpenTelemetry opt-in. Records are
-delivered as the call returns, so there is no unsent-event state to forget.
+`reset_otel` restores the logger default and `otel_enabled?(fallback)` resolves
+it. Logger `set_otel_enabled`, `use_otel`, and `not_otel` update the default.
+Only OTEL-marked/named transports are filtered.

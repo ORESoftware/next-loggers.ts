@@ -88,10 +88,13 @@ pub struct OtelLogRecord {
 pub trait Transport: Send + Sync {
     fn write(&self, record: &LogRecord) -> Result<(), String>;
 
-    /// Marks this transport as an OpenTelemetry bridge so `not_otel()` and
-    /// per-call routing can skip it.
     fn is_otel(&self) -> bool {
-        false
+        self.name()
+            .is_some_and(|name| name.eq_ignore_ascii_case("opentelemetry"))
+    }
+
+    fn name(&self) -> Option<&str> {
+        None
     }
 }
 
@@ -117,6 +120,10 @@ where
 {
     fn is_otel(&self) -> bool {
         true
+    }
+
+    fn name(&self) -> Option<&str> {
+        Some("opentelemetry")
     }
 
     fn write(&self, record: &LogRecord) -> Result<(), String> {
@@ -173,7 +180,7 @@ pub struct Logger {
     runtime: String,
     fields: BTreeMap<String, String>,
     transports: Vec<Arc<dyn Transport>>,
-    otel: bool,
+    otel_enabled: bool,
     id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
@@ -190,7 +197,7 @@ impl Logger {
             runtime: "wasm".to_string(),
             fields: BTreeMap::new(),
             transports: Vec::new(),
-            otel: true,
+            otel_enabled: true,
             id_factory: Arc::new(default_id),
             // WASM hosts should inject an RFC3339 clock. This deterministic
             // fallback is safe on targets without wall-clock capabilities.
@@ -213,24 +220,28 @@ impl Logger {
         self
     }
 
-    /// Sends every record to OTEL transports (the default).
-    pub fn use_otel(self) -> Self {
-        self.with_otel(true)
-    }
-
-    /// Makes OpenTelemetry opt-in: only `log_with(.., Some(true))` calls reach
-    /// OTEL transports.
-    pub fn not_otel(self) -> Self {
-        self.with_otel(false)
-    }
-
-    pub fn with_otel(mut self, enabled: bool) -> Self {
-        self.otel = enabled;
+    pub fn with_otel_enabled(mut self, enabled: bool) -> Self {
+        self.otel_enabled = enabled;
         self
     }
 
-    pub fn otel_enabled(&self) -> bool {
-        self.otel
+    pub fn set_otel_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.otel_enabled = enabled;
+        self
+    }
+
+    pub fn use_otel(mut self) -> Self {
+        self.otel_enabled = true;
+        self
+    }
+
+    pub fn not_otel(mut self) -> Self {
+        self.otel_enabled = false;
+        self
+    }
+
+    pub fn is_otel_enabled(&self) -> bool {
+        self.otel_enabled
     }
 
     pub fn with_id_factory<F>(mut self, factory: F) -> Self
@@ -256,26 +267,32 @@ impl Logger {
         context: Option<&LogContext>,
         event_fields: BTreeMap<String, String>,
     ) -> Result<LogRecord, String> {
-        self.log_with(level, message, context, event_fields, None)
+        self.event(level, message, context, event_fields).send()
     }
 
-    /// `otel` overrides this call's OTEL routing: `Some(true)` forces delivery
-    /// to OTEL transports, `Some(false)` skips them, `None` follows the logger
-    /// default. This core delivers at the call site, so there is no deferred
-    /// event to forget to send.
-    pub fn log_with(
+    pub fn event(
         &self,
         level: LogLevel,
         message: impl Into<String>,
         context: Option<&LogContext>,
         event_fields: BTreeMap<String, String>,
-        otel: Option<bool>,
-    ) -> Result<LogRecord, String> {
-        let message = message.into();
+    ) -> Event<'_> {
+        Event {
+            logger: self,
+            level,
+            message: message.into(),
+            context: context.cloned(),
+            event_fields,
+            otel_enabled: None,
+        }
+    }
+
+    fn emit(&self, event: &Event<'_>) -> Result<LogRecord, String> {
+        let message = event.message.clone();
         let mut fields = self.fields.clone();
         let mut trace_id = None;
         let mut tags = Vec::new();
-        if let Some(context) = context {
+        if let Some(context) = &event.context {
             fields.extend(context.fields.clone());
             if let Some(span_id) = &context.span_id {
                 fields.insert("otel.span_id".to_string(), span_id.clone());
@@ -290,13 +307,13 @@ impl Logger {
             trace_id = context.trace_id.clone();
             tags = unique(context.tags.clone());
         }
-        fields.extend(event_fields);
+        fields.extend(event.event_fields.clone());
         let trace_ids = trace_id.clone().into_iter().collect();
         let record = LogRecord {
             schema: SCHEMA.to_string(),
             id: (self.id_factory)(),
             timestamp: (self.clock)(),
-            level,
+            level: event.level,
             runtime: self.runtime.clone(),
             app_name: self.app_name.clone(),
             name: self.name.clone(),
@@ -307,9 +324,8 @@ impl Logger {
             trace_ids,
             tags,
         };
-        let include_otel = otel.unwrap_or(self.otel);
         for transport in &self.transports {
-            if !include_otel && transport.is_otel() {
+            if transport.is_otel() && !event.is_otel_enabled(self.is_otel_enabled()) {
                 continue;
             }
             transport.write(&record)?;
@@ -331,6 +347,43 @@ impl Logger {
         context: Option<&LogContext>,
     ) -> Result<LogRecord, String> {
         self.log(LogLevel::Error, message, context, BTreeMap::new())
+    }
+}
+
+pub struct Event<'a> {
+    logger: &'a Logger,
+    level: LogLevel,
+    message: String,
+    context: Option<LogContext>,
+    event_fields: BTreeMap<String, String>,
+    otel_enabled: Option<bool>,
+}
+
+impl Event<'_> {
+    pub fn with_otel(mut self, enabled: bool) -> Self {
+        self.otel_enabled = Some(enabled);
+        self
+    }
+
+    pub fn use_otel(self) -> Self {
+        self.with_otel(true)
+    }
+
+    pub fn not_otel(self) -> Self {
+        self.with_otel(false)
+    }
+
+    pub fn reset_otel(mut self) -> Self {
+        self.otel_enabled = None;
+        self
+    }
+
+    pub fn is_otel_enabled(&self, fallback: bool) -> bool {
+        self.otel_enabled.unwrap_or(fallback)
+    }
+
+    pub fn send(self) -> Result<LogRecord, String> {
+        self.logger.emit(&self)
     }
 }
 

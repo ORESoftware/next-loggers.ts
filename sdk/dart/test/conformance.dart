@@ -59,23 +59,32 @@ Future<void> main() async {
   assert(traces[1] == 'trace-b');
 
   final routedOtel = <Map<String, Object?>>[];
-  final routedAll = <Map<String, Object?>>[];
-  final routed = Logger(
-    appName: 'checkout',
-    transports: <LogTransport>[
-      OpenTelemetryTransport(routedOtel.add),
-      SupabaseTransport(routedAll.add),
-    ],
+  final regular = MemoryTransport();
+  final routedLogger = Logger(
+    appName: 'routing',
+    otel: false,
+    transports: <LogTransport>[OpenTelemetryTransport(routedOtel.add), regular],
   );
-  await routed.info('default on');
-  await routed.warn('opted out', otel: false);
-  await routed.notOtel().error('logger opted out');
-  await routed.notOtel().info('call opted back in', otel: true);
-  assert(routedOtel.length == 2);
-  assert(routedOtel.first['body'] == 'default on');
-  assert(routedOtel.last['body'] == 'call opted back in');
-  assert(routedAll.length == 4);
-  assert(routed.otel, 'notOtel() must return a derived logger');
+  final defaultOff = routedLogger.event(LogLevel.info, 'default-off');
+  assert(!defaultOff.isOtelEnabled(routedLogger.isOtelEnabled()));
+  await defaultOff.send();
+  await routedLogger.event(LogLevel.info, 'forced-on').useOtel().send();
+  await routedLogger
+      .event(LogLevel.info, 'reset-off')
+      .useOtel()
+      .resetOtel()
+      .send();
+  routedLogger.useOtel();
+  await routedLogger.event(LogLevel.warn, 'forced-off').notOtel().send();
+  await routedLogger.event(LogLevel.info, 'logger-on').withOtel(true).send();
+  assert(
+    routedOtel.map((record) => record['body']).toList().join(',') ==
+        'forced-on,logger-on',
+  );
+  assert(
+    regular.records.map((record) => record['message']).toList().join(',') ==
+        'default-off,forced-on,reset-off,forced-off,logger-on',
+  );
 
   print('Dart/Flutter next-loggers conformance passed');
 }

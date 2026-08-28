@@ -29,30 +29,19 @@ log = Logger(
 )
 ```
 
-## OpenTelemetry on or off, per event
+## Per-event OpenTelemetry routing
 
-`OpenTelemetryTransport` carries `otel = True`, so a single record can opt in or
-out without touching the OTEL SDK:
+`otel=True` is the logger default. Set `otel=False` to make OTEL opt-in, then
+override individual events without suppressing Memory, Supabase, or other
+transports:
 
 ```python
-log.info("charged").use_otel().send()
-log.warn("noisy poll").not_otel().send()   # other transports still receive it
-log.error("failed").with_otel(export_errors).send()
+log = Logger(otel=False, transports=[otel_transport, supabase_transport])
+log.info("sampled in").use_otel().send()
+log.warn("OTEL excluded").not_otel().send()
+log.info("computed").with_otel(route_to_otel).send()
 ```
 
-`Logger(otel=False)` makes OpenTelemetry opt-in instead of the default
-export-everything; `log.use_otel()` / `log.not_otel()` flip it later, and
-`event.reset_otel()` returns an event to the logger default.
-
-## Missing `send()`
-
-An event is only delivered by `send()`. The package ships a checker for the
-mistake, usable as a command or as a flake8 plugin:
-
-```sh
-next-loggers-lint src/            # exits 1 on findings
-flake8 --select NL1 src/          # NL100 diagnostics inline
-```
-
-Files that never import next-loggers are skipped, so another library's
-`logger.info()` is never flagged; `--logger-name` adds your own names.
+`reset_otel()` returns an event to the logger default, while
+`is_otel_enabled(fallback)` exposes the resolved decision. Logger-level
+`set_otel_enabled()`, `use_otel()`, and `not_otel()` update the default.

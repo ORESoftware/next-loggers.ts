@@ -1,7 +1,7 @@
 import gleam/erlang/process
 import gleam/json
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import oresoftware_next_loggers as logging
@@ -25,6 +25,8 @@ pub fn main() {
 
 fn transport(subject: process.Subject(Captured)) -> logging.Transport {
   logging.Transport(
+    name: None,
+    otel: False,
     write: fn(record) {
       process.send(subject, Written(record))
       Ok(Nil)
@@ -41,7 +43,6 @@ fn transport(subject: process.Subject(Captured)) -> logging.Transport {
       process.send(subject, Closed)
       Ok(Nil)
     },
-    is_otel: False,
   )
 }
 
@@ -184,50 +185,51 @@ pub fn explicit_otel_and_supabase_transports_test() {
 }
 
 pub fn per_event_otel_routing_test() {
-  let subject = process.new_subject()
-  let transport =
+  let otel_subject = process.new_subject()
+  let otel_transport =
     logging.otel_transport(fn(record) {
-      process.send(subject, OtelWritten(record))
+      process.send(otel_subject, OtelWritten(record))
       Ok(Nil)
     })
-  let logger = logging.new(fixture_options(), transport)
+  let opt_in_logger =
+    logging.new(
+      logging.Options(..fixture_options(), otel: False),
+      otel_transport,
+    )
 
   let assert Ok(_) =
-    logging.info(logger, "default on", [])
+    logging.info(opt_in_logger, "default off", [])
     |> logging.send
-  let assert Ok(_) =
-    logging.warn(logger, "opted out", [])
-    |> logging.not_otel
-    |> logging.send
-  let assert Ok(_) =
-    logging.error(logger, "opted back in", [])
-    |> logging.not_otel
-    |> logging.use_otel
-    |> logging.send
+  process.receive(otel_subject, within: 10)
+  |> should.equal(Error(Nil))
 
-  let assert Ok(OtelWritten(first)) = process.receive(subject, within: 1000)
-  first.body |> should.equal("default on")
-  let assert Ok(OtelWritten(second)) = process.receive(subject, within: 1000)
-  second.body |> should.equal("opted back in")
-  process.receive(subject, within: 50) |> should.be_error
+  let assert Ok(_) =
+    logging.info(opt_in_logger, "forced on", [])
+    |> logging.event_use_otel
+    |> logging.send
+  let assert Ok(OtelWritten(forced)) =
+    process.receive(otel_subject, within: 1000)
+  forced.body |> should.equal("forced on")
 
-  // otel: False makes OpenTelemetry opt-in per event.
-  let opt_in_options = logging.Options(..fixture_options(), otel: False)
-  let opt_in = logging.new(opt_in_options, transport)
+  let _unsent_default_off = logging.info(opt_in_logger, "unsent off", [])
+  logging.flush_on_exit(opt_in_logger)
+  |> should.equal(Ok(Nil))
+  process.receive(otel_subject, within: 10)
+  |> should.equal(Error(Nil))
+
+  let regular_subject = process.new_subject()
+  let regular_logger =
+    logging.new(fixture_options(), transport(regular_subject))
   let assert Ok(_) =
-    logging.info(opt_in, "skipped", [])
+    logging.warn(regular_logger, "regular survives", [])
+    |> logging.event_not_otel
     |> logging.send
-  process.receive(subject, within: 50) |> should.be_error
-  let assert Ok(_) =
-    logging.info(opt_in, "selected", [])
-    |> logging.use_otel
-    |> logging.send
-  let assert Ok(OtelWritten(third)) = process.receive(subject, within: 1000)
-  third.body |> should.equal("selected")
-  let assert Ok(_) =
-    logging.info(opt_in, "reset follows default", [])
-    |> logging.use_otel
-    |> logging.reset_otel
-    |> logging.send
-  process.receive(subject, within: 50) |> should.be_error
+  let assert Ok(Written(regular)) =
+    process.receive(regular_subject, within: 1000)
+  regular.message |> should.equal("regular survives")
+
+  logging.info(logging.not_otel(opt_in_logger), "logger remains off", [])
+  |> logging.reset_otel
+  |> logging.is_otel_enabled(False)
+  |> should.be_false
 }

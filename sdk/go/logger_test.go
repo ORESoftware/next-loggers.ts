@@ -177,71 +177,53 @@ func TestExplicitOpenTelemetryAndSupabaseTransports(t *testing.T) {
 	}
 }
 
-func TestPerEventOtelRouting(t *testing.T) {
-	var otel []OpenTelemetryLogRecord
-	memory := &MemoryTransport{}
+func TestPerEventOpenTelemetryRouting(t *testing.T) {
+	otelDefault := false
+	otel := make([]OpenTelemetryLogRecord, 0, 2)
+	regular := &MemoryTransport{}
 	logger := NewLogger(Options{
-		AppName: "checkout",
+		Otel: &otelDefault,
 		Transports: []Transport{
 			NewOpenTelemetryTransport(func(record OpenTelemetryLogRecord) error {
 				otel = append(otel, record)
 				return nil
 			}),
-			memory,
+			regular,
 		},
 		Console: false,
 	})
 
-	if err := logger.Info("default on").Send(); err != nil {
+	defaultOff := logger.Info("default-off")
+	if defaultOff.IsOtelEnabled(logger.IsOtelEnabled()) {
+		t.Fatal("logger default should keep OTEL off")
+	}
+	for _, event := range []*Event{
+		defaultOff,
+		logger.Info("forced-on").UseOtel(),
+		logger.Info("reset-off").UseOtel().ResetOtel(),
+	} {
+		if err := event.Send(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logger.UseOtel()
+	if err := logger.Warn("forced-off").NotOtel().Send(); err != nil {
 		t.Fatal(err)
 	}
-	if err := logger.Warn("opted out").NotOtel().Send(); err != nil {
+	if err := logger.Info("logger-on").WithOtel(true).Send(); err != nil {
 		t.Fatal(err)
-	}
-	if err := logger.Error("opted in").UseOtel().Send(); err != nil {
-		t.Fatal(err)
-	}
-	if len(otel) != 2 || otel[0].Body != "default on" || otel[1].Body != "opted in" {
-		t.Fatalf("unexpected OTEL deliveries: %#v", otel)
-	}
-	if len(memory.Records) != 3 {
-		t.Fatalf("non-OTEL transports must receive every record, got %d", len(memory.Records))
 	}
 
-	disabled := false
-	optIn := NewLogger(Options{
-		AppName: "checkout",
-		Otel:    &disabled,
-		Transports: []Transport{NewOpenTelemetryTransport(func(record OpenTelemetryLogRecord) error {
-			otel = append(otel, record)
-			return nil
-		})},
-		Console: false,
-	})
-	before := len(otel)
-	if err := optIn.Info("skipped").Send(); err != nil {
-		t.Fatal(err)
+	if len(otel) != 2 || otel[0].Body != "forced-on" || otel[1].Body != "logger-on" {
+		t.Fatalf("unexpected OTEL routing: %#v", otel)
 	}
-	if len(otel) != before {
-		t.Fatalf("otel:false must make OpenTelemetry opt-in, got %#v", otel[before:])
+	wantRegular := []string{"default-off", "forced-on", "reset-off", "forced-off", "logger-on"}
+	if len(regular.Records) != len(wantRegular) {
+		t.Fatalf("regular transport delivery count: got %d, want %d", len(regular.Records), len(wantRegular))
 	}
-	if err := optIn.Info("selected").UseOtel().Send(); err != nil {
-		t.Fatal(err)
-	}
-	if len(otel) != before+1 || otel[before].Body != "selected" {
-		t.Fatalf("UseOtel must override the logger default: %#v", otel[before:])
-	}
-	optIn.UseOtel()
-	if err := optIn.Info("default flipped").Send(); err != nil {
-		t.Fatal(err)
-	}
-	if len(otel) != before+2 {
-		t.Fatalf("logger.UseOtel must flip the default: %#v", otel[before:])
-	}
-	if err := optIn.Info("reset follows default").UseOtel().ResetOtel().Send(); err != nil {
-		t.Fatal(err)
-	}
-	if len(otel) != before+3 {
-		t.Fatalf("ResetOtel must fall back to the logger default: %#v", otel[before:])
+	for index, message := range wantRegular {
+		if regular.Records[index].Message != message {
+			t.Fatalf("regular transport missed %q: %#v", message, regular.Records)
+		}
 	}
 }
