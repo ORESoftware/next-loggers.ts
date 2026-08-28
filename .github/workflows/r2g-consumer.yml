@@ -20,22 +20,22 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Check out next-loggers without credentials
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       # This was the immutable tip of ORESoftware/r2g/main reviewed on
-      # 2026-08-03. Updating the pin is an explicit compatibility decision;
+      # 2026-08-06. Updating the pin is an explicit compatibility decision;
       # the workflow never executes a mutable branch from another repository.
       - name: Check out the current reviewed r2g tip
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ORESoftware/r2g
-          ref: 61b62f4b9eae255cccf72b7152dced829589190c
+          ref: 3e4e2263f7b6e5c086deba311cfaa38f72d40d73
           path: .tooling/r2g
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -59,7 +59,7 @@ jobs:
       - name: Install r2g from its packed artifact
         run: |
           npm install --global "$RUNNER_TEMP"/r2g-package/r2g-*.tgz
-          rm -rf .tooling/r2g
+          find .tooling/r2g -depth -delete
           test ! -e .tooling/r2g
           command -v r2g
 

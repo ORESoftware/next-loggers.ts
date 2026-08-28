@@ -8,7 +8,7 @@ export interface MetricOptions {
   labelNames?: readonly string[];
   /** Maximum total series, including the reserved overflow series. Default 1000. */
   maxSeries?: number;
-  /** Maximum UTF-16 code units retained per label value. Default 256. */
+  /** Maximum UTF-16 code units per rendered label value. Default 256. */
   maxLabelValueLength?: number;
 }
 
@@ -17,8 +17,8 @@ interface NormalizedLabels {
   rendered: string;
 }
 
-const METRIC_NAME = /^[a-zA-Z_:][a-zA-Z0-9_:]*$/u;
-const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/u;
+const METRIC_NAME = /^[a-zA-Z_:][a-zA-Z0-9_:]*$/;
+const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const DEFAULT_MAX_SERIES = 1_000;
 const DEFAULT_MAX_LABEL_VALUE_LENGTH = 256;
 const OVERFLOW_LABEL_VALUE = '__overflow__';
@@ -42,11 +42,11 @@ function assertLabelName(name: string): void {
 }
 
 function escapeHelp(value: string): string {
-  return value.replace(/\\/gu, '\\\\').replace(/\n/gu, '\\n');
+  return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
 }
 
 function escapeLabel(value: string): string {
-  return value.replace(/\\/gu, '\\\\').replace(/\n/gu, '\\n').replace(/"/gu, '\\"');
+  return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"');
 }
 
 function boundedLabelValue(value: string, maximum: number): string {
@@ -115,18 +115,6 @@ abstract class MetricBase {
     return normalizeLabels(this.labelNames, labels, this.maxLabelValueLength);
   }
 
-  private overflow(): NormalizedLabels {
-    const overflow: Record<string, MetricLabelValue> = {};
-    for (const name of this.labelNames) {
-      overflow[name] = OVERFLOW_LABEL_VALUE;
-    }
-    return normalizeLabels(
-      this.labelNames,
-      overflow,
-      Math.max(this.maxLabelValueLength, OVERFLOW_LABEL_VALUE.length),
-    );
-  }
-
   protected labels(labels?: MetricLabels): NormalizedLabels {
     const normalized = this.normalize(labels);
     if (this.labelText.has(normalized.key)) {
@@ -138,16 +126,17 @@ abstract class MetricBase {
       return normalized;
     }
 
-    // One slot is permanently reserved for bounded overflow. This makes
-    // maxSeries an actual upper bound rather than maxSeries + 1.
+    // Reserve one slot for a bounded overflow series. New unseen combinations
+    // collapse there once the ordinary series budget is exhausted.
     const ordinaryBudget = Math.max(0, this.maxSeries - 1);
-    const overflow = this.overflow();
-    const ordinaryCount = this.labelText.has(overflow.key)
-      ? this.labelText.size - 1
-      : this.labelText.size;
-    if (ordinaryCount >= ordinaryBudget) {
-      this.labelText.set(overflow.key, overflow.rendered);
-      return overflow;
+    if (this.labelText.size >= ordinaryBudget) {
+      const overflow: Record<string, MetricLabelValue> = {};
+      for (const name of this.labelNames) {
+        overflow[name] = OVERFLOW_LABEL_VALUE;
+      }
+      const overflowLabels = this.normalize(overflow);
+      this.labelText.set(overflowLabels.key, overflowLabels.rendered);
+      return overflowLabels;
     }
 
     this.labelText.set(normalized.key, normalized.rendered);
@@ -159,8 +148,12 @@ abstract class MetricBase {
     if (this.labelText.has(normalized.key) || this.labelNames.length === 0) {
       return normalized.key;
     }
-    const overflow = this.overflow();
-    return this.labelText.has(overflow.key) ? overflow.key : normalized.key;
+    const overflow: Record<string, MetricLabelValue> = {};
+    for (const name of this.labelNames) {
+      overflow[name] = OVERFLOW_LABEL_VALUE;
+    }
+    const overflowKey = this.normalize(overflow).key;
+    return this.labelText.has(overflowKey) ? overflowKey : normalized.key;
   }
 
   expositionNames(): readonly string[] {
@@ -451,29 +444,24 @@ export class InstrumentedTransport implements LogTransport {
     this.onMetricError = options.onMetricError;
   }
 
-  private metric(operation: string, callback: () => void): boolean {
+  private metric(operation: string, callback: () => void): void {
     try {
       callback();
-      return true;
     } catch (error) {
       reportMetricError(this.onMetricError, error, operation);
-      return false;
     }
   }
 
   async write(record: LogRecord): Promise<void> {
     const transport = this.inner.name || 'anonymous';
     const labels = { transport };
-    let started: number | undefined;
+    let started = 0;
     try {
       started = this.now();
     } catch (error) {
       reportMetricError(this.onMetricError, error, 'clock-start');
     }
-    const inFlightRecorded = this.metric(
-      'in-flight-inc',
-      () => this.metrics.transportInFlight.inc(labels),
-    );
+    this.metric('in-flight-inc', () => this.metrics.transportInFlight.inc(labels));
     try {
       await this.inner.write(record);
       this.metric('write-success', () =>
@@ -485,23 +473,17 @@ export class InstrumentedTransport implements LogTransport {
       );
       throw error;
     } finally {
-      if (inFlightRecorded) {
-        this.metric('in-flight-dec', () => this.metrics.transportInFlight.dec(labels));
+      this.metric('in-flight-dec', () => this.metrics.transportInFlight.dec(labels));
+      let finished = started;
+      try {
+        finished = this.now();
+      } catch (error) {
+        reportMetricError(this.onMetricError, error, 'clock-finish');
       }
-      if (started !== undefined) {
-        let finished: number | undefined;
-        try {
-          finished = this.now();
-        } catch (error) {
-          reportMetricError(this.onMetricError, error, 'clock-finish');
-        }
-        if (finished !== undefined) {
-          const elapsed = Number.isFinite(finished - started) ? Math.max(0, finished - started) : 0;
-          this.metric('write-duration', () =>
-            this.metrics.transportDurationSeconds.observe(labels, elapsed / 1_000),
-          );
-        }
-      }
+      const elapsed = Number.isFinite(finished - started) ? Math.max(0, finished - started) : 0;
+      this.metric('write-duration', () =>
+        this.metrics.transportDurationSeconds.observe(labels, elapsed / 1_000),
+      );
     }
   }
 

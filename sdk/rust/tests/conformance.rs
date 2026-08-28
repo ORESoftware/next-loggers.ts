@@ -1,6 +1,9 @@
-use next_loggers::{Event, JsonObject, LogLevel, Logger, MemoryTransport, Options, Transport};
+use next_loggers::{
+    Event, JsonObject, LogLevel, Logger, MemoryTransport, OpenTelemetryLogRecord,
+    OpenTelemetryTransport, Options, SupabaseTransport, Transport,
+};
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 fn object(value: Value) -> JsonObject {
     value.as_object().expect("expected JSON object").clone()
@@ -14,15 +17,17 @@ fn matches_shared_record_fixture() {
     .expect("valid shared fixture");
 
     let transport = Arc::new(MemoryTransport::default());
-    let mut options = Options::default();
-    options.app_name = "payments".into();
-    options.name = Some("audit".into());
-    options.runtime = "contract-test".into();
-    options.fields = object(json!({"environment": "test"}));
-    options.console = false;
-    options.transports = vec![transport.clone() as Arc<dyn Transport>];
-    options.id_factory = Arc::new(|| "contract-record-1".into());
-    options.clock = Arc::new(|| "2026-01-02T03:04:05.000Z".into());
+    let options = Options {
+        app_name: "payments".into(),
+        name: Some("audit".into()),
+        runtime: "contract-test".into(),
+        fields: object(json!({"environment": "test"})),
+        console: false,
+        transports: vec![transport.clone() as Arc<dyn Transport>],
+        id_factory: Arc::new(|| "contract-record-1".into()),
+        clock: Arc::new(|| "2026-01-02T03:04:05.000Z".into()),
+        ..Options::default()
+    };
     let logger = Logger::new(options);
 
     let event = logger
@@ -77,9 +82,12 @@ impl AuditEventExt for Event {
 #[test]
 fn levels_send_false_and_extension_traits_work() {
     let transport = Arc::new(MemoryTransport::default());
-    let mut options = Options::default().with_transport(transport.clone());
-    options.max_level = LogLevel::Warn;
-    options.console = false;
+    let options = Options {
+        max_level: LogLevel::Warn,
+        console: false,
+        transports: vec![transport.clone() as Arc<dyn Transport>],
+        ..Options::default()
+    };
     let logger = Logger::new(options);
 
     logger.info(vec![json!("filtered")]).send().unwrap();
@@ -97,4 +105,123 @@ fn levels_send_false_and_extension_traits_work() {
     assert_eq!(transport.records().len(), 1);
     assert_eq!(transport.records()[0].level, LogLevel::Fatal);
     assert_eq!(transport.records()[0].fields["actor"], json!("user-9"));
+}
+
+#[test]
+fn explicit_opentelemetry_and_supabase_transports_work() {
+    let otel = Arc::new(Mutex::new(Vec::<OpenTelemetryLogRecord>::new()));
+    let supabase = Arc::new(Mutex::new(Vec::new()));
+    let otel_sink = otel.clone();
+    let supabase_sink = supabase.clone();
+
+    let options = Options {
+        app_name: "checkout".into(),
+        runtime: "rust".into(),
+        console: false,
+        id_factory: Arc::new(|| "otel-record-1".into()),
+        clock: Arc::new(|| "2026-01-02T03:04:05.000Z".into()),
+        transports: vec![
+            Arc::new(OpenTelemetryTransport::new(move |record| {
+                otel_sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+            Arc::new(SupabaseTransport::new(move |record| {
+                supabase_sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+        ],
+        ..Options::default()
+    };
+    let logger = Logger::new(options);
+
+    logger
+        .error(vec![json!("payment failed")])
+        .add_trace("0123456789abcdef0123456789abcdef", false)
+        .add_fields(object(json!({
+            "otel.span_id": "0123456789abcdef",
+            "region": "us-east-1"
+        })))
+        .send()
+        .expect("send through OTEL and Supabase");
+
+    let otel = otel.lock().unwrap();
+    assert_eq!(otel.len(), 1);
+    assert_eq!(otel[0].severity_text, "ERROR");
+    assert_eq!(otel[0].severity_number, 17);
+    assert_eq!(
+        otel[0].attributes["trace.id"],
+        json!("0123456789abcdef0123456789abcdef")
+    );
+    assert_eq!(otel[0].attributes["service.name"], json!("checkout"));
+    drop(otel);
+
+    let supabase = supabase.lock().unwrap();
+    assert_eq!(supabase.len(), 1);
+    assert_eq!(supabase[0].schema, "next-loggers/v1");
+    assert_eq!(supabase[0].message, "payment failed");
+}
+
+#[test]
+fn per_event_opentelemetry_routing_preserves_regular_transports() {
+    let otel = Arc::new(Mutex::new(Vec::<OpenTelemetryLogRecord>::new()));
+    let otel_sink = otel.clone();
+    let regular = Arc::new(MemoryTransport::default());
+    let logger = Logger::new(Options {
+        otel: false,
+        console: false,
+        transports: vec![
+            Arc::new(OpenTelemetryTransport::new(move |record| {
+                otel_sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+            regular.clone() as Arc<dyn Transport>,
+        ],
+        ..Options::default()
+    });
+
+    let default_off = logger.info(vec![json!("default-off")]);
+    assert!(!default_off.is_otel_enabled(logger.is_otel_enabled()));
+    default_off.send().unwrap();
+    logger
+        .info(vec![json!("forced-on")])
+        .use_otel()
+        .send()
+        .unwrap();
+    logger
+        .info(vec![json!("reset-off")])
+        .use_otel()
+        .reset_otel()
+        .send()
+        .unwrap();
+    logger.use_otel();
+    logger
+        .warn(vec![json!("forced-off")])
+        .not_otel()
+        .send()
+        .unwrap();
+    logger
+        .info(vec![json!("logger-on")])
+        .with_otel(true)
+        .send()
+        .unwrap();
+
+    let otel = otel.lock().unwrap();
+    assert_eq!(otel.len(), 2);
+    assert_eq!(otel[0].body, "forced-on");
+    assert_eq!(otel[1].body, "logger-on");
+    drop(otel);
+    assert_eq!(
+        regular
+            .records()
+            .into_iter()
+            .map(|record| record.message)
+            .collect::<Vec<_>>(),
+        [
+            "default-off",
+            "forced-on",
+            "reset-off",
+            "forced-off",
+            "logger-on"
+        ]
+    );
 }

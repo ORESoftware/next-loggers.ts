@@ -26,6 +26,14 @@ class LogLevel(str, Enum):
 
 LEVELS: Sequence[LogLevel] = tuple(LogLevel)
 _LEVEL_INDEX = {level: index for index, level in enumerate(LEVELS)}
+OTEL_SEVERITY_NUMBERS = {
+    LogLevel.TRACE: 1,
+    LogLevel.DEBUG: 5,
+    LogLevel.INFO: 9,
+    LogLevel.WARN: 13,
+    LogLevel.ERROR: 17,
+    LogLevel.FATAL: 21,
+}
 
 
 def _normalize_level(level: Any) -> LogLevel:
@@ -162,6 +170,56 @@ class MemoryTransport:
         self.closed = True
 
 
+class OpenTelemetryTransport:
+    """Dependency-free adapter for an application-owned OTEL log emitter."""
+
+    name = "opentelemetry"
+    otel = True
+
+    def __init__(self, emit: Callable[[Dict[str, Any]], None]) -> None:
+        if not callable(emit):
+            raise TypeError("OpenTelemetryTransport requires a callable emitter")
+        self.emit = emit
+
+    def write(self, record: LogRecord) -> None:
+        attributes: Dict[str, Any] = {
+            "service.name": record.app_name,
+            "next_logger.schema": SCHEMA,
+            "next_logger.runtime": record.runtime,
+            "log.record.uid": record.id,
+        }
+        if record.trace_id:
+            attributes["trace.id"] = record.trace_id
+        for key, value in record.fields.items():
+            attributes[f"next_logger.field.{key}"] = value
+        self.emit(
+            {
+                "body": record.message,
+                "severityText": record.level.value,
+                "severityNumber": OTEL_SEVERITY_NUMBERS[record.level],
+                "timestamp": record.timestamp,
+                "attributes": attributes,
+            }
+        )
+
+
+OtelTransport = OpenTelemetryTransport
+
+
+class SupabaseTransport:
+    """Adapter for an application-owned authenticated Supabase sender."""
+
+    name = "supabase"
+
+    def __init__(self, send: Callable[[Dict[str, Any]], None]) -> None:
+        if not callable(send):
+            raise TypeError("SupabaseTransport requires a callable sender")
+        self.send_record = send
+
+    def write(self, record: LogRecord) -> None:
+        self.send_record(record.to_dict())
+
+
 class LogEvent:
     """Extensible chainable event. ``send`` is idempotent."""
 
@@ -179,12 +237,30 @@ class LogEvent:
         self.context: List[Any] = []
         self.meta: List[Any] = []
         self.stack_trace: List[str] = []
+        self._otel_enabled: Optional[bool] = None
         self._record: Optional[LogRecord] = None
         self._sent = False
 
     def add_fields(self, fields: Mapping[str, Any]) -> "LogEvent":
         self.fields.update(fields)
         return self
+
+    def use_otel(self) -> "LogEvent":
+        return self.with_otel(True)
+
+    def not_otel(self) -> "LogEvent":
+        return self.with_otel(False)
+
+    def with_otel(self, enabled: bool) -> "LogEvent":
+        self._otel_enabled = bool(enabled)
+        return self
+
+    def reset_otel(self) -> "LogEvent":
+        self._otel_enabled = None
+        return self
+
+    def is_otel_enabled(self, fallback: bool) -> bool:
+        return bool(fallback) if self._otel_enabled is None else self._otel_enabled
 
     def add_trace(self, trace_id: str, make_first: bool = False) -> "LogEvent":
         value = str(trace_id or "").strip()
@@ -287,6 +363,7 @@ class Logger:
         fields: Optional[Mapping[str, Any]] = None,
         logged_in_user: Optional[Mapping[str, Any]] = None,
         transports: Optional[Iterable[Transport]] = None,
+        otel: bool = True,
         console: bool = True,
         id_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
         clock: Callable[[], str] = _default_clock,
@@ -298,6 +375,7 @@ class Logger:
         self.fields = dict(fields or {})
         self.current_user = dict(logged_in_user or {})
         self.transports = list(transports or [])
+        self.otel = bool(otel)
         self.console = console
         self.id_factory = id_factory
         self.clock = clock
@@ -347,6 +425,19 @@ class Logger:
             self.current_user.update(user)
         return self
 
+    def set_otel_enabled(self, enabled: bool) -> "Logger":
+        self.otel = bool(enabled)
+        return self
+
+    def use_otel(self) -> "Logger":
+        return self.set_otel_enabled(True)
+
+    def not_otel(self) -> "Logger":
+        return self.set_otel_enabled(False)
+
+    def is_otel_enabled(self) -> bool:
+        return self.otel
+
     def _enabled(self, level: LogLevel) -> bool:
         return _LEVEL_INDEX[level] >= _LEVEL_INDEX[self.max_level]
 
@@ -365,6 +456,10 @@ class Logger:
             )
         if store:
             for transport in self.transports:
+                name = str(getattr(transport, "name", "")).lower()
+                is_otel = bool(getattr(transport, "otel", False)) or name == "opentelemetry"
+                if is_otel and not event.is_otel_enabled(self.is_otel_enabled()):
+                    continue
                 transport.write(record)
         return record
 
@@ -414,12 +509,16 @@ def create_logger(**options: Any) -> Logger:
 
 __all__ = [
     "LEVELS",
+    "OTEL_SEVERITY_NUMBERS",
     "SCHEMA",
     "LogEvent",
     "LogLevel",
     "LogRecord",
     "Logger",
     "MemoryTransport",
+    "OpenTelemetryTransport",
+    "OtelTransport",
+    "SupabaseTransport",
     "Transport",
     "create_logger",
 ]

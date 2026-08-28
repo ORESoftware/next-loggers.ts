@@ -127,3 +127,103 @@ func TestLevelsSendFalseAndEmbedding(t *testing.T) {
 		t.Fatal("embedded event did not add actor")
 	}
 }
+
+func TestExplicitOpenTelemetryAndSupabaseTransports(t *testing.T) {
+	otel := make([]OpenTelemetryLogRecord, 0, 1)
+	supabase := make([]LogRecord, 0, 1)
+	logger := NewLogger(Options{
+		AppName: "checkout",
+		Runtime: "go",
+		Transports: []Transport{
+			NewOpenTelemetryTransport(func(record OpenTelemetryLogRecord) error {
+				otel = append(otel, record)
+				return nil
+			}),
+			NewSupabaseTransport(func(record LogRecord) error {
+				supabase = append(supabase, record)
+				return nil
+			}),
+		},
+		Console:   false,
+		IDFactory: func() string { return "otel-record-1" },
+		Clock:     func() string { return "2026-01-02T03:04:05.000Z" },
+	})
+
+	err := logger.Error("payment failed").
+		AddTrace("0123456789abcdef0123456789abcdef").
+		AddFields(map[string]any{
+			"otel.span_id": "0123456789abcdef",
+			"region":       "us-east-1",
+		}).
+		Send()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(otel) != 1 || len(supabase) != 1 {
+		t.Fatalf("expected one OTEL and Supabase delivery, got %d and %d", len(otel), len(supabase))
+	}
+	if otel[0].SeverityText != "ERROR" || otel[0].SeverityNumber != 17 {
+		t.Fatalf("unexpected OTEL severity: %#v", otel[0])
+	}
+	if otel[0].Attributes["trace.id"] != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("trace correlation missing: %#v", otel[0].Attributes)
+	}
+	if otel[0].Attributes["service.name"] != "checkout" {
+		t.Fatalf("service name missing: %#v", otel[0].Attributes)
+	}
+	if supabase[0].Schema != Schema || supabase[0].Message != "payment failed" {
+		t.Fatalf("unexpected Supabase record: %#v", supabase[0])
+	}
+}
+
+func TestPerEventOpenTelemetryRouting(t *testing.T) {
+	otelDefault := false
+	otel := make([]OpenTelemetryLogRecord, 0, 2)
+	regular := &MemoryTransport{}
+	logger := NewLogger(Options{
+		Otel: &otelDefault,
+		Transports: []Transport{
+			NewOpenTelemetryTransport(func(record OpenTelemetryLogRecord) error {
+				otel = append(otel, record)
+				return nil
+			}),
+			regular,
+		},
+		Console: false,
+	})
+
+	defaultOff := logger.Info("default-off")
+	if defaultOff.IsOtelEnabled(logger.IsOtelEnabled()) {
+		t.Fatal("logger default should keep OTEL off")
+	}
+	for _, event := range []*Event{
+		defaultOff,
+		logger.Info("forced-on").UseOtel(),
+		logger.Info("reset-off").UseOtel().ResetOtel(),
+	} {
+		if err := event.Send(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logger.UseOtel()
+	if err := logger.Warn("forced-off").NotOtel().Send(); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Info("logger-on").WithOtel(true).Send(); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(otel) != 2 || otel[0].Body != "forced-on" || otel[1].Body != "logger-on" {
+		t.Fatalf("unexpected OTEL routing: %#v", otel)
+	}
+	wantRegular := []string{"default-off", "forced-on", "reset-off", "forced-off", "logger-on"}
+	if len(regular.Records) != len(wantRegular) {
+		t.Fatalf("regular transport delivery count: got %d, want %d", len(regular.Records), len(wantRegular))
+	}
+	for index, message := range wantRegular {
+		if regular.Records[index].Message != message {
+			t.Fatalf("regular transport missed %q: %#v", message, regular.Records)
+		}
+	}
+}

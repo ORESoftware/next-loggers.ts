@@ -28,6 +28,7 @@ import { createNodeLogger } from '@oresoftware/next-loggers/node';
 import {
   createOpenTelemetryContextProvider,
   createOpenTelemetryTransport,
+  withOpenTelemetry,
 } from '@oresoftware/next-loggers/otel';
 
 const otelLogger = logs.getLogger('my-service');
@@ -61,6 +62,66 @@ const logger = createNodeLogger({
 
 The OpenTelemetry packages shown above belong to the application, not this
 library. `next-loggers` intentionally has no dependency on an OTEL SDK.
+
+## Per-event routing and setup helper
+
+The routing precedence is identical in all 11 SDKs:
+
+1. an event set with `useOtel`/`use_otel` is sent to OTEL;
+2. an event set with `notOtel`/`not_otel` is not sent to OTEL;
+3. `resetOtel`/`reset_otel` removes that event decision;
+4. otherwise the logger `otel` default applies, and defaults to `true`.
+
+The computed form is `withOtel(enabled)` (or `with_otel`) and the resolver is
+`isOtelEnabled(fallback)` (or `is_otel_enabled`). Some native SDKs retain their
+existing immediate level methods and expose `event`/`event_use_otel` for this
+chain; their README contains the exact language-native spelling.
+
+Routing recognizes the built-in OTEL bridge marker and the transport name
+`opentelemetry`, so a hand-written bridge can opt into the same behavior. A
+record excluded from OTEL continues through every non-OTEL transport.
+
+TypeScript can compose transport and context setup in one call:
+
+```ts
+const logger = createNodeLogger(withOpenTelemetry(
+  { appName: 'my-service', transports: existingTransports },
+  { logger: otelLogger, activeSpan, activeContext: () => context.active() },
+));
+```
+
+`withOpenTelemetry` appends rather than replaces transports. It derives an OTEL
+context provider from `activeSpan` by default, but never replaces an explicitly
+supplied `contextProvider`.
+
+## Native SDK bridge contract
+
+Every native SDK exposes an explicit OTEL transport backed by a callback owned
+by the application. The callback receives the same logical record:
+
+```json
+{
+  "body": "payment failed",
+  "severityText": "ERROR",
+  "severityNumber": 17,
+  "timestamp": "2026-01-02T03:04:05.000Z",
+  "attributes": {
+    "service.name": "payments",
+    "next_logger.schema": "next-loggers/v1",
+    "next_logger.runtime": "python",
+    "log.record.uid": "record-1",
+    "trace.id": "0123456789abcdef0123456789abcdef"
+  }
+}
+```
+
+The idiomatic entry points are `OpenTelemetryTransport` in Python, Go, Rust,
+Dart, and WASM; `OtelTransport` in Java and Ruby; and `otel_transport` in
+Gleam, Erlang, and Elixir. Python also exports `OtelTransport` as an alias.
+Each SDK has a matching injected-sender Supabase transport. These adapters do
+not take ownership of application OTEL or Supabase clients, so provider startup,
+authentication, retries, flush, and shutdown remain explicit at the application
+boundary.
 
 ## Context and sampling semantics
 

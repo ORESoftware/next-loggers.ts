@@ -133,7 +133,7 @@ function nonNegativeInteger(value: number | undefined, fallback: number): number
 
 function decodeBase64Url(value: string): string | undefined {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const normalized = value.replace(/-/gu, '+').replace(/_/gu, '/').replace(/=+$/u, '');
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/u, '');
   const bytes: number[] = [];
   let buffer = 0;
   let bits = 0;
@@ -144,10 +144,11 @@ function decodeBase64Url(value: string): string | undefined {
     }
     buffer = (buffer << 6) | index;
     bits += 6;
-    if (bits >= 8) {
+    while (bits >= 8) {
       bits -= 8;
       bytes.push((buffer >> bits) & 0xff);
     }
+    buffer &= bits === 0 ? 0 : (1 << bits) - 1;
   }
   try {
     return typeof TextDecoder === 'function'
@@ -217,12 +218,15 @@ function functionUrl(url: string, functionName: string): string {
   }
   parsed.search = '';
   parsed.hash = '';
-  if (!parsed.pathname.includes('/functions/v1/')) {
+  const marker = '/functions/v1/';
+  if (!parsed.pathname.includes(marker)) {
     const name = functionName.trim();
     if (!name) {
       throw new TypeError('Supabase Edge Function name must not be empty');
     }
-    parsed.pathname = `/functions/v1/${encodeURIComponent(name)}`;
+    parsed.pathname = `${marker}${encodeURIComponent(name)}`;
+  } else if (!parsed.pathname.split(marker)[1]?.replace(/^\/+|\/+$/gu, '')) {
+    throw new TypeError('Supabase ingest URL must include an Edge Function name');
   }
   return parsed.toString();
 }
@@ -253,18 +257,15 @@ async function resolveToken(
 }
 
 function hashBatch(records: readonly QueuedRecord[]): string {
-  let left = 0x811c9dc5;
-  let right = 0x9e3779b9;
+  let hash = 0x811c9dc5;
   for (const item of records) {
-    for (let index = 0; index < item.encoded.length; index += 1) {
-      const code = item.encoded.charCodeAt(index);
-      left ^= code;
-      left = Math.imul(left, 0x01000193) >>> 0;
-      right ^= code + index;
-      right = Math.imul(right, 0x85ebca6b) >>> 0;
+    const value = `${item.record.id}\u0000${item.record.timestamp}\u0000`;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
     }
   }
-  return `nl-${records.length}-${left.toString(16).padStart(8, '0')}${right.toString(16).padStart(8, '0')}`;
+  return `nl-${records.length}-${hash.toString(16).padStart(8, '0')}`;
 }
 
 /**
@@ -274,8 +275,9 @@ function hashBatch(records: readonly QueuedRecord[]): string {
  */
 export class SupabaseIngestTransport implements LogTransport {
   readonly name = 'supabase-ingest';
-  readonly options: Readonly<SupabaseIngestOptions>;
   readonly endpoint: string;
+
+  private readonly options: Readonly<SupabaseIngestOptions>;
 
   private readonly queue = new CursorQueue<QueuedRecord>();
   private readonly resolved: ResolvedOptions;
@@ -505,8 +507,6 @@ export class SupabaseIngestTransport implements LogTransport {
           'content-type': 'application/json',
           apikey: this.publishableKey,
           ...(token ? { authorization: `Bearer ${token}` } : {}),
-          'x-next-loggers-schema': BATCH_SCHEMA,
-          'x-next-loggers-batch-id': batchId,
           'x-client-info': '@oresoftware/next-loggers',
         },
         body,
