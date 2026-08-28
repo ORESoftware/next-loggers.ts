@@ -222,6 +222,30 @@ context_tags_are_copied_test() ->
     ),
     ?assertEqual(Tags, maps:get(tags, Record)).
 
+
+context_merges_trace_state_span_and_flags_test() ->
+    %% From main #5: correlation fields beyond trace_id must survive send().
+    Logger = next_loggers:new(<<"correlation">>, <<"erlang">>, []),
+    Record = next_loggers:with_context(
+        #{
+            trace_id => <<"trace-1">>,
+            span_id => <<"span-1">>,
+            trace_flags => 1,
+            trace_state => <<"vendor=value">>,
+            fields => #{route => <<"/pay">>},
+            tags => [<<"request">>]
+        },
+        fun() -> next_loggers:info(Logger, <<"inside">>, #{event => true}) end
+    ),
+    Fields = maps:get(fields, Record),
+    ?assertEqual(<<"trace-1">>, maps:get(traceId, Record)),
+    ?assertEqual(<<"span-1">>, maps:get(<<"otel.span_id">>, Fields)),
+    ?assertEqual(1, maps:get(<<"otel.trace_flags">>, Fields)),
+    ?assertEqual(<<"vendor=value">>, maps:get(<<"otel.trace_state">>, Fields)),
+    ?assertEqual(<<"/pay">>, maps:get(route, Fields)),
+    ?assertEqual(true, maps:get(event, Fields)),
+    ?assertEqual([<<"request">>], maps:get(tags, Record)).
+
 wire_schema_and_values_are_stable_test() ->
     Logger = next_loggers:new(<<"wire">>, <<"erlang">>, []),
     Record = next_loggers:info(Logger, <<"hello">>, #{nested => #{safe => true}}),

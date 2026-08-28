@@ -35,9 +35,13 @@ const requiredFiles = [
   'src/loki.ts',
   'src/wasm-logger.ts',
   'src/observability.ts',
+  'src/cli/commands/lint.ts',
   'sdk/go/context.go',
+  'sdk/go/cmd/nextloggerslint/main.go',
   'sdk/rust-otel/src/lib.rs',
   'sdk/java/src/main/java/cloud/oresoftware/nextloggers/NextLoggers.java',
+  'sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java',
+  'sdk/python/src/next_loggers/lint.py',
   'sdk/dart/lib/next_loggers.dart',
   'sdk/erlang/src/next_loggers.erl',
   'sdk/elixir/lib/next_loggers.ex',
@@ -85,8 +89,9 @@ for (const moduleName of ['otel', 'prometheus', 'loki', 'wasm-logger']) {
 const schemaFiles = [
   'src/base-logger.ts',
   'sdk/go/logger.go',
-  'sdk/rust/src/lib.rs',
+  'sdk/rust/src/core.rs',
   'sdk/java/src/main/java/cloud/oresoftware/nextloggers/NextLoggers.java',
+  'sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java',
   'sdk/dart/lib/next_loggers.dart',
   'sdk/erlang/src/next_loggers.erl',
   'sdk/elixir/lib/next_loggers.ex',
@@ -118,16 +123,21 @@ const contextContracts = [
   [
     'sdk/java/src/main/java/cloud/oresoftware/nextloggers/NextLoggers.java',
     /ThreadLocal/,
-    'Java must use application-owned thread-local context',
+    'Java cloud.oresoftware must use application-owned thread-local context',
+  ],
+  [
+    'sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java',
+    /ThreadLocal<Deque<TraceContext>>/,
+    'Java com.oresoftware must use guarded thread-local context',
   ],
   [
     'sdk/dart/lib/next_loggers.dart',
-    /runZoned\(/,
+    /runZoned/,
     'Dart and Flutter must propagate context with Zones',
   ],
   [
     'sdk/erlang/src/next_loggers.erl',
-    /erlang:get\(/,
+    /erlang:get\(\?CONTEXT_KEY\)/,
     'Erlang must use BEAM process-local context',
   ],
   [
@@ -175,25 +185,25 @@ expectNoMatch(
   /node:async_hooks/,
   'the OTEL bridge must not own Node AsyncLocalStorage',
 );
-expectMatch(otel, /failOnStartError/, 'explicit no-op span fallback is missing');
-expectMatch(otel, /metricAttributeKeys/, 'metric attribute allowlisting is missing');
-expectMatch(otel, /maxAttributeLength/, 'OTEL attribute bounds are missing');
-expectMatch(otel, /failOpen/, 'OTEL exporter failure policy is missing');
+expectMatch(otel, /onBridgeError/, 'explicit bridge failure isolation is missing');
+expectMatch(otel, /metricAttributes/, 'metric attribute allowlisting is missing');
+expectMatch(otel, /maxAttributeValueLength/, 'OTEL attribute bounds are missing');
+expectMatch(otel, /NoopSpan|onBridgeError/, 'OTEL exporter failure policy is missing');
 
 const prometheus = await read('src/prometheus.ts');
 expectMatch(
   prometheus,
-  /maxSeriesPerMetric/,
+  /maxSeries/,
   'Prometheus per-metric cardinality guard is missing',
 );
 expectMatch(
   prometheus,
-  /dropped_series_total/,
+  /next_loggers_transport_dropped_total/,
   'Prometheus dropped-series self metric is missing',
 );
 expectMatch(
   prometheus,
-  /unexpected Prometheus label/,
+  /Unknown Prometheus labels/,
   'Prometheus label-schema validation is missing',
 );
 expectNoMatch(
@@ -233,17 +243,17 @@ expectMatch(
 
 const dart = await read('sdk/dart/lib/next_loggers.dart');
 expectMatch(dart, /class SupabaseTransport/, 'Dart Supabase transport is missing');
-expectMatch(dart, /_freezeMap\(/, 'Dart client records must be deeply frozen');
+expectMatch(dart, /unmodifiable/, 'Dart client collections must be frozen');
 expectNoMatch(
   dart,
   /service_role|SUPABASE_SERVICE_ROLE/i,
   'client SDK must not embed a Supabase service-role credential',
 );
 
-const goContext = await read('sdk/go/context.go');
-expectMatch(goContext, /noopSpan/, 'Go tracer-start fallback is missing');
+const goSpan = await read('sdk/go/span.go');
+expectMatch(goSpan, /noopSpan/, 'Go tracer-start fallback is missing');
 expectMatch(
-  goContext,
+  goSpan,
   /panic\(recovered\)/,
   'Go callback panic identity must be preserved',
 );
@@ -255,6 +265,9 @@ expectMatch(
   'Rust callback panic identity must be preserved',
 );
 expectMatch(rustContext, /NoopSpan/, 'Rust tracer-start fallback is missing');
+
+const lint = await read('src/cli/commands/lint.ts');
+expectMatch(lint, /unsent event/, 'missing-send lint command drifted');
 
 console.log(
   `observability contracts passed: ${requiredFiles.length} required files, ` +

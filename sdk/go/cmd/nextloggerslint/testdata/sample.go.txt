@@ -1,0 +1,29 @@
+package sample
+
+import nextloggers "github.com/ORESoftware/next-loggers.ts/sdk/go"
+
+type service struct {
+	logger *nextloggers.Logger
+}
+
+func run(other *otherLogger) {
+	logger := nextloggers.NewLogger(nextloggers.Options{AppName: "checkout"})
+
+	logger.Info("delivered").Send()                       // ok
+	logger.Warn("delivered").NotOtel().Send()             // ok
+	logger.Error("delivered").UseOtel().SendWithStore(false) // ok
+
+	logger.Info("dropped")                                // want: missing send
+	logger.Warn("dropped").AddFields(nil)                 // want: missing send
+	logger.Error("dropped").UseOtel()                     // want: missing send
+
+	event := logger.Info("assigned")
+	event.Send()
+
+	other.Info("not a next-loggers call")
+}
+
+func (s *service) handle() {
+	s.logger.Debug("field logger dropped") // want: missing send
+	s.logger.Debug("field logger sent").Send()
+}
