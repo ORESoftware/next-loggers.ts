@@ -1,7 +1,7 @@
 {
   "name": "@oresoftware/next-loggers",
   "version": "0.1.0",
-  "description": "Runtime-aware structured loggers with native SDKs for JavaScript/TypeScript, Python, Go, Rust, WebAssembly, Java, Dart, Ruby, Gleam, Erlang, and Elixir",
+  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, and edge workers",
   "type": "module",
   "types": "./dist/base-logger.d.ts",
   "sideEffects": false,
@@ -11,6 +11,9 @@
   "files": [
     "dist",
     "src",
+    "sdk",
+    "contracts",
+    "docs",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -109,6 +112,18 @@
       "types": "./dist/prometheus.d.ts",
       "default": "./dist/prometheus.js"
     },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
+    },
     "./supabase-ingest": {
       "types": "./dist/supabase-ingest.d.ts",
       "default": "./dist/supabase-ingest.js"
@@ -141,13 +156,14 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run postbuild && npm run stage:nodejs",
+    "build": "tsc -p tsconfig.build.json && npm run postbuild",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:contracts": "node scripts/test-observability-contracts.mjs",
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
-    "test:all": "npm test && npm run test:runtimes && npm run test:polyglot",
+    "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
     "audit:shutdown": "node scripts/audit-server-shutdown.mjs",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
     "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json --prefix sdk/nodejs",
@@ -190,6 +206,14 @@
     "nextjs",
     "esm",
     "supabase",
+    "wasm",
+    "rust",
+    "go",
+    "gleam",
+    "java",
+    "erlang",
+    "elixir",
+    "dart",
     "bun",
     "deno",
     "edge",

@@ -171,3 +171,29 @@ test('require-send tracks loggers assigned to this.* properties', () => {
   );
   assert.equal(messages.length, 1);
 });
+
+test('require-send sees through useOtel()/notOtel() chains', () => {
+  const linter = new Linter();
+  const messages = linter.verify(
+    `
+    import { createLogger } from '@oresoftware/next-loggers';
+    const logger = createLogger();
+    logger.info('routed').useOtel().send();
+    logger.warn('routed').notOtel().send();
+    logger.error('routed but never sent').useOtel();
+    logger.fatal('toggled and dropped').withOtel(false).addTags('a');
+    `,
+    [
+      {
+        languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+        plugins: { 'next-loggers': eslintPlugin },
+        rules: { 'next-loggers/require-send': 'warn' },
+      },
+    ],
+    { filename: 'routing.mjs' },
+  );
+  assert.deepEqual(
+    messages.map((message) => message.line),
+    [6, 7],
+  );
+});
