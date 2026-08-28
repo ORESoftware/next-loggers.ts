@@ -145,5 +145,35 @@ class LoggerContractTests(unittest.TestCase):
         )
 
 
+    def test_per_event_otel_routing(self):
+        emitted = []
+        memory = MemoryTransport()
+        logger = Logger(
+            app_name="checkout",
+            console=False,
+            transports=[OpenTelemetryTransport(emitted.append), memory],
+        )
+        logger.info("default on").send()
+        logger.warn("opted out").not_otel().send()
+        logger.error("opted in").use_otel().send()
+        self.assertEqual([entry["body"] for entry in emitted], ["default on", "opted in"])
+        self.assertEqual(len(memory.records), 3)
+
+        opt_in = Logger(
+            app_name="checkout",
+            console=False,
+            otel=False,
+            transports=[OpenTelemetryTransport(emitted.append)],
+        )
+        opt_in.info("skipped").send()
+        self.assertEqual(len(emitted), 2)
+        opt_in.info("selected").use_otel().send()
+        self.assertEqual(emitted[-1]["body"], "selected")
+        opt_in.info("still skipped").use_otel().reset_otel().send()
+        self.assertEqual(len(emitted), 3)
+        opt_in.use_otel().info("default flipped").send()
+        self.assertEqual(emitted[-1]["body"], "default flipped")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,9 @@
   "files": [
     "dist",
     "src",
+    "sdk",
+    "contracts",
+    "docs",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -101,6 +104,18 @@
       "types": "./dist/prometheus.d.ts",
       "default": "./dist/prometheus.js"
     },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
+    },
     "./supabase-ingest": {
       "types": "./dist/supabase-ingest.d.ts",
       "default": "./dist/supabase-ingest.js"
@@ -137,9 +152,12 @@
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:contracts": "node scripts/test-observability-contracts.mjs",
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
-    "test:all": "npm test && npm run test:runtimes && npm run test:polyglot",
+    "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
+    "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
+    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json --prefix sdk/nodejs",
     "prepack": "npm test"
   },
   "engines": {
@@ -179,6 +197,14 @@
     "nextjs",
     "esm",
     "supabase",
+    "wasm",
+    "rust",
+    "go",
+    "gleam",
+    "java",
+    "erlang",
+    "elixir",
+    "dart",
     "bun",
     "deno",
     "edge",

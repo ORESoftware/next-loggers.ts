@@ -115,6 +115,33 @@ await log.flush({ timeoutMillis: 2_000 });
 
 Circular references, errors, dates, bigints, maps, sets, functions, and symbols are normalized before transport.
 
+## OpenTelemetry on or off, per call
+
+An OTEL transport is a transport like any other, so a single record can opt in or out of it without touching the OpenTelemetry SDK:
+
+```ts
+log.info('charged').useOtel().send();     // force delivery to OTEL transports
+log.warn('noisy poll').notOtel().send();  // every other transport still gets it
+log.error('failed').withOtel(exportErrors).send(); // computed at runtime
+```
+
+The logger decides the default those events fall back to. `otel: true` (the default) exports everything and lets `notOtel()` opt out; `otel: false` makes OpenTelemetry opt-in:
+
+```ts
+import { withOpenTelemetry } from '@oresoftware/next-loggers/otel';
+
+const log = createNodeLogger(withOpenTelemetry(
+  { appName: 'checkout-api' },
+  { logger: otelLogger, activeSpan, otel: false },
+));
+
+log.info('routine').send();               // skips OTEL
+log.error('paged').useOtel().send();      // exported
+log.useOtel();                            // flip the default; anew() children inherit it
+```
+
+Skipping OTEL skips the whole bridge for that record — no log emit, span event, exception, status, or metric — while every other transport still receives it. The wire record is unchanged; this is delivery routing, not a schema field. Every native SDK has the same control; see [docs/otel.md](docs/otel.md#choosing-opentelemetry-per-call).
+
 ## ESLint: require `.send()`
 
 The ESM-only ESLint plugin supports ESLint 9 and 10 flat config. Its recommended rule warns when a standalone logger chain forgets `.send()`:
@@ -147,6 +174,29 @@ export default [
 ```
 
 The rule intentionally expects an explicit `.send()`. If a specific logger relies on `autoSend: true`, disable or scope the rule for that code.
+
+## Missing `.send()` in every runtime
+
+A level call builds an event; only `send()` delivers it. Each runtime has a diagnostic for the mistake, native where the language offers one:
+
+| Runtime | Tool | How it reports |
+| --- | --- | --- |
+| JavaScript / TypeScript | `next-loggers/require-send` ESLint rule | lint warning |
+| Rust, WASM | `#[must_use]` on `Event` | `rustc` warning: ``unused `Event` that must be used`` |
+| Go | `go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint ./...` | `file:line:col` findings, exit 1 |
+| Python | `next-loggers-lint path/` or the bundled flake8 plugin (`NL100`) | flake8 diagnostics or CLI findings |
+| Gleam | `next-loggers lint src/` (the compiler has no must-use attribute) | `file:line:col` findings, exit 1 |
+| Any of the above, in one pass | `next-loggers lint .` | `file:line:col` findings, exit 1 |
+
+```console
+$ next-loggers lint sdk src
+src/handlers/checkout.ts:42:3: next-loggers event is never sent; call send() so it reaches transports
+lint: 1 unsent event(s) in 113 checked file(s)
+```
+
+`next-loggers lint` understands JavaScript, TypeScript, Go, Rust, Python, and Gleam, including multi-line chains and Gleam `|>` pipelines. It only inspects files that reference next-loggers (pass `--all` to override, `--logger-name audit` to add names), and reports a bare expression statement only — an event that is returned, assigned, or passed along may be sent elsewhere.
+
+Java, Ruby, Dart, Erlang, and Elixir have nothing to report: their loggers deliver at the call site instead of returning a deferred event. In Dart the call returns a `Future`, so enable the analyzer's `unawaited_futures` lint to catch a delivery that is never awaited.
 
 ## Supabase Realtime WebSocket streaming
 
@@ -372,6 +422,7 @@ The package ships a `next-loggers` executable.
 npx next-loggers doctor          # will logging behave correctly here?
 npx next-loggers resolve --runtime workerd
 npx next-loggers smoke --depth full
+npx next-loggers lint .          # events built but never sent, in six languages
 your-app | npx next-loggers pretty
 ```
 
@@ -381,6 +432,7 @@ your-app | npx next-loggers pretty
 | `resolve` | Walks the package's own `exports` map for a condition set and prints what each subpath resolves to — for *any* runtime, from any host. |
 | `smoke` | Imports an installed build and verifies it. This is the `zed r2g` entry point and the only automatic guard against publishing a stale `dist/`. |
 | `pretty` | Renders `next-loggers/v1` NDJSON from stdin. Non-JSON lines pass through untouched, so it is safe at the end of any pipeline. |
+| `lint` | Reports events that never call `send()` in JavaScript, TypeScript, Go, Rust, Python, and Gleam; exit 1 on findings. |
 | `flags` | Prints the flag/env contract; `--check` fails on drift. |
 
 `doctor` exists for one reason above the others: when the single-frame context
