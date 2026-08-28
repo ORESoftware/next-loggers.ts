@@ -3,8 +3,20 @@
 // depend on @types/node, so consumers with skipLibCheck:false still typecheck.
 
 declare module 'node:fs/promises' {
+  export interface DirectoryEntry {
+    name: string;
+    isDirectory(): boolean;
+  }
+  export interface FileStats {
+    isDirectory(): boolean;
+  }
   export function readFile(path: string | URL, encoding: 'utf8'): Promise<string>;
   export function access(path: string | URL): Promise<void>;
+  export function stat(path: string | URL): Promise<FileStats>;
+  export function readdir(
+    path: string | URL,
+    options: { withFileTypes: true },
+  ): Promise<DirectoryEntry[]>;
 }
 
 declare module 'node:path' {
