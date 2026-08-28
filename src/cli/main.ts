@@ -96,6 +96,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     case 'pretty':
       result = await (await import('./commands/pretty.js')).runPretty(ctx);
       break;
+    case 'packages':
+      result = await (await import('./commands/packages.js')).runPackages(ctx);
+      break;
     case 'flags':
       result = await (await import('./commands/flags.js')).runFlags(ctx);
       break;

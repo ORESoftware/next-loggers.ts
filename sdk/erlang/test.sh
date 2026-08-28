@@ -1,6 +1,10 @@
-#!/usr/bin/env sh
-set -eu
-rm -rf build
-mkdir -p build
-erlc -Werror -o build src/*.erl test/*.erl
-erl -noshell -pa build -eval 'case eunit:test([next_loggers_tests, next_loggers_adversarial_tests], [verbose]) of ok -> halt(0); _ -> halt(1) end.'
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")" && pwd)
+out=$(mktemp -d "${TMPDIR:-/tmp}/next-loggers-erlang.XXXXXX")
+erlc -Werror -o "$out" \
+  "$root/src/next_loggers.erl" \
+  "$root/test/next_loggers_tests.erl" \
+  "$root/test/next_loggers_adversarial_tests.erl"
+erl -noshell -pa "$out" -eval 'case eunit:test([next_loggers_tests, next_loggers_adversarial_tests], [verbose]) of ok -> halt(0); _ -> halt(1) end.'

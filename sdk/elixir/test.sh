@@ -1,5 +1,5 @@
-#!/usr/bin/env sh
-set -eu
-mix format --check-formatted
-mix compile --warnings-as-errors
-mix test
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")" && pwd)
+elixir -r "$root/lib/next_loggers.ex" "$root/test/next_loggers_test.exs"

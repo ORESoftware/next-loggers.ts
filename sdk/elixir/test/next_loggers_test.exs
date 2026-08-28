@@ -1,139 +1,100 @@
-defmodule NextLoggersTest do
+ExUnit.start()
+
+defmodule ORESoftware.NextLoggersTest do
   use ExUnit.Case, async: true
 
-  test "process-local context flows into records" do
-    logger =
-      NextLoggers.new(
-        app_name: "payments",
-        transport: NextLoggers.memory_transport()
-      )
+  alias ORESoftware.NextLoggers
 
-    NextLoggers.with_context(
-      %{
-        trace_id: "trace-1",
-        span_id: "span-1",
-        trace_flags: 1,
-        fields: %{route: "/pay"}
-      },
-      fn ->
-        assert {:ok, _} =
-                 logger
-                 |> NextLoggers.info(["inside"])
-                 |> NextLoggers.send()
-      end
-    )
-
-    assert_receive {:next_loggers_record, record}
-    assert record.traceId == "trace-1"
-    assert record.fields["otel.span_id"] == "span-1"
-    assert record.fields["route"] == "/pay"
-    assert NextLoggers.current_context() == nil
-  end
-
-  test "BEAM processes keep independent context" do
-    parent = self()
-
-    for trace <- ["left", "right"] do
-      spawn(fn ->
-        NextLoggers.with_context(%{trace_id: trace}, fn ->
-          send(parent, {:trace, trace, NextLoggers.current_context().trace_id})
-        end)
-      end)
-    end
-
-    assert_receive {:trace, "left", "left"}
-    assert_receive {:trace, "right", "right"}
-  end
-
-  test "explicit span lifecycle stays behind next-loggers" do
+  test "process context flows to OTEL and Supabase transports" do
     parent = self()
 
     logger =
-      NextLoggers.new(
-        minimum_level: :debug,
-        transport: NextLoggers.memory_transport()
+      NextLoggers.new("payments",
+        name: "audit",
+        fields: %{"environment" => "test"},
+        id_factory: fn -> "elixir-record-1" end,
+        clock: fn -> "2026-01-02T03:04:05.000Z" end,
+        transports: [
+          NextLoggers.otel_transport(fn value -> send(parent, {:otel, value}) end),
+          NextLoggers.supabase_transport(fn value -> send(parent, {:supabase, value}) end)
+        ]
       )
 
-    tracer = %{
-      start: fn _name, _attributes ->
-        {:span, %{trace_id: "trace", span_id: "span", trace_flags: 1}}
-      end,
-      set_status: fn _span, code, _description -> send(parent, {:status, code}) end,
-      record_exception: fn _span, _kind, reason, _stack ->
-        send(parent, {:recorded, reason})
-      end,
-      end: fn _span -> send(parent, :ended) end
-    }
+    record =
+      NextLoggers.with_context(
+        %{
+          trace_id: "0123456789abcdef0123456789abcdef",
+          span_id: "0123456789abcdef",
+          trace_flags: 1,
+          trace_state: "vendor=value",
+          fields: %{"requestId" => "request-1"},
+          tags: ["otel", "beam"]
+        },
+        fn -> NextLoggers.error(logger, "payment failed", %{"orderId" => "order-42"}) end
+      )
 
-    assert 7 ==
-             NextLoggers.with_span(
-               logger,
-               tracer,
-               "operation",
-               %{},
-               fn _span -> 7 end
-             )
-
-    assert_receive {:status, 1}
-    assert_receive :ended
-    assert_receive {:next_loggers_record, %{message: "span started: operation"}}
-    assert_receive {:next_loggers_record, %{message: "span completed: operation"}}
+    assert record["schema"] == "next-loggers/v1"
+    assert record["level"] == "ERROR"
+    assert record["traceId"] == "0123456789abcdef0123456789abcdef"
+    assert record["fields"]["otel.span_id"] == "0123456789abcdef"
+    assert record["fields"]["requestId"] == "request-1"
+    assert record["fields"]["orderId"] == "order-42"
+    assert_receive {:otel, %{"severityNumber" => 17}}
+    assert_receive {:supabase, ^record}
+    assert NextLoggers.current_context() == %{}
   end
 
-  test "OTEL lifecycle and start failures do not replace results" do
+  test "concurrent tasks keep process-local trace context isolated" do
+    logger = NextLoggers.new("app", transports: [])
+
+    traces =
+      [a: "trace-a", b: "trace-b"]
+      |> Task.async_stream(
+        fn {name, trace_id} ->
+          NextLoggers.with_context(%{trace_id: trace_id, span_id: "#{name}-span"}, fn ->
+            NextLoggers.info(logger, Atom.to_string(name))["traceId"]
+          end)
+        end,
+        ordered: true
+      )
+      |> Enum.map(fn {:ok, trace_id} -> trace_id end)
+
+    assert traces == ["trace-a", "trace-b"]
+  end
+
+  test "per-event OTEL routing preserves regular transports" do
+    parent = self()
+
     logger =
-      NextLoggers.new(
-        minimum_level: :debug,
-        transport: NextLoggers.memory_transport()
+      NextLoggers.new("routing",
+        otel: false,
+        transports: [
+          NextLoggers.otel_transport(fn value -> send(parent, {:routed_otel, value}) end),
+          NextLoggers.supabase_transport(fn value -> send(parent, {:regular, value}) end)
+        ]
       )
 
-    broken = %{
-      start: fn _name, _attributes -> {:span, %{trace_id: "trace"}} end,
-      set_status: fn _span, _code, _description -> raise "status unavailable" end,
-      record_exception: fn _span, _kind, _reason, _stack ->
-        raise "record unavailable"
-      end,
-      end: fn _span -> raise "end unavailable" end
-    }
+    default_off = NextLoggers.event(logger, "INFO", "default-off")
+    refute NextLoggers.is_otel_enabled(default_off, logger.otel)
+    NextLoggers.send(default_off)
+    assert_receive {:regular, %{"message" => "default-off"}}
+    refute_receive {:routed_otel, _}, 10
 
-    assert 11 ==
-             NextLoggers.with_span(
-               logger,
-               broken,
-               "resilient",
-               %{},
-               fn _ -> 11 end
-             )
+    logger
+    |> NextLoggers.event("INFO", "forced-on")
+    |> NextLoggers.use_otel()
+    |> NextLoggers.send()
 
-    failing = %{
-      broken
-      | start: fn _name, _attributes -> raise "sdk unavailable" end
-    }
+    assert_receive {:routed_otel, %{"body" => "forced-on"}}
+    assert_receive {:regular, %{"message" => "forced-on"}}
 
-    assert 12 ==
-             NextLoggers.with_span(
-               logger,
-               failing,
-               "fallback",
-               %{},
-               fn _ -> 12 end
-             )
+    logger
+    |> NextLoggers.use_otel()
+    |> NextLoggers.event("WARN", "forced-off")
+    |> NextLoggers.not_otel()
+    |> NextLoggers.send()
 
-    assert bridge_failure?("set success status")
-    assert bridge_failure?("end span")
-    assert bridge_failure?("start span")
-  end
-
-  defp bridge_failure?(operation) do
-    receive do
-      {:next_loggers_record, record} ->
-        if record.fields["otel.bridge_operation"] == operation do
-          true
-        else
-          bridge_failure?(operation)
-        end
-    after
-      1_000 -> false
-    end
+    assert_receive {:regular, %{"message" => "forced-off"}}
+    refute_receive {:routed_otel, _}, 10
   end
 end

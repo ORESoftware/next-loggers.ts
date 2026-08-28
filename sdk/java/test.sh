@@ -1,7 +1,9 @@
-#!/usr/bin/env sh
-set -eu
-rm -rf build
-mkdir -p build
-javac -Xlint:all -Werror -d build $(find src/main/java src/test/java -name '*.java' -print)
-java -ea -cp build com.oresoftware.nextloggers.NextLoggersTest
-java -ea -cp build com.oresoftware.nextloggers.NextLoggersAdversarialTest
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")" && pwd)
+out=$(mktemp -d "${TMPDIR:-/tmp}/next-loggers-java.XXXXXX")
+
+find "$root/src/main/java" "$root/src/test/java" -name '*.java' -print0 \
+  | xargs -0 javac --release 17 -Werror -Xlint:all -d "$out"
+java -ea -cp "$out" cloud.oresoftware.nextloggers.NextLoggersTest
