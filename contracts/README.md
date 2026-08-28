@@ -1,57 +1,72 @@
-# Polyglot logger contract
+# ores.otel.log polyglot contracts
 
-Every next-loggers SDK emits the `next-loggers/v1` record defined by
-[`log-record.schema.json`](log-record.schema.json). Field names and level values
-are wire-compatible across languages; public method names follow each
-language's naming conventions.
+`ores.otel.log` keeps one logical logging API and one wire format across every runtime without pretending that every language should use the same method spelling or context primitive.
 
-## Required interfaces
+The canonical repository is `ores-otel/ores.otel.log`. The historical `ORESoftware/next-loggers.ts` repository remains a compatibility mirror and must retain its history and published package compatibility.
 
-`Logger` exposes `trace`, `debug`, `info`, `warn`, `error`, and `fatal`. Each
-method creates an unsent `LogEvent`. The event supports fields, users, traces,
-routine IDs, tags, context, and metadata, then an idempotent `send`.
+## Contract files
 
-`Transport` accepts one complete `LogRecord`. A language may model lifecycle
-methods as optional interfaces or default trait methods, but the shared
-operations are:
-
-- `write(record)` delivers a record.
-- `flush()` drains pending writes.
-- `flush_on_exit(records)` gets the records active during shutdown.
-- `close()` releases transport resources.
-
-`Logger.flush()` drains writes already sent. `Logger.flush_on_exit()` first
-sends every unsent event and then invokes transport shutdown hooks.
-`Logger.close()` performs the shutdown flush before closing transports.
-
-The minimum enabled level defaults to `INFO`, matching the TypeScript
-`maxLevel` behavior. `send(false)` may write locally but must not invoke remote
-transports.
-
-## Conformance
-
-Each SDK creates the deterministic record in
-[`fixtures/conformance-record.json`](fixtures/conformance-record.json) by
-injecting the ID generator and clock. Tests compare decoded JSON values so
-object key order is irrelevant while array order remains part of the contract.
-
-Language packages live under `sdk/`:
-
-| Language | Package/module |
+| File | Purpose |
 | --- | --- |
-| TypeScript/JavaScript | `@oresoftware/next-loggers` |
-| Python | `oresoftware-next-loggers` / `next_loggers` |
-| Go | `github.com/ORESoftware/next-loggers.ts/sdk/go` |
-| Rust | `oresoftware-next-loggers` / `next_loggers` |
-| Gleam | `oresoftware_next_loggers` |
-| Java | `io.github.oresoftware:next-loggers` |
-| Dart / Flutter | `oresoftware_next_loggers` |
-| Ruby | `oresoftware-next-loggers` / `ORESoftware::NextLoggers` |
-| Erlang | `oresoftware_next_loggers_erlang` / `next_loggers` |
-| Elixir | `oresoftware_next_loggers` / `NextLoggers` |
-| Rust / WebAssembly | `oresoftware-next-loggers-wasm` / `next_loggers_wasm` |
+| `log-record.schema.json` | Stable `next-loggers/v1` record emitted by every SDK |
+| `schemas/log-context.schema.json` | Logical context shared by ALS, task, thread, process, Zone, Fiber, and host adapters |
+| `schemas/otel-log-record.schema.json` | Explicit application-owned OTEL bridge structure |
+| `schemas/transport-batch.schema.json` | Bounded `next-loggers/batch/v1` client envelope |
+| `schemas/sdk-manifest.schema.json` | Required logical APIs and runtime guarantees for each SDK |
+| `schemas/test-repository-matrix.schema.json` | Cross-repository test-org contract |
+| `sdk-manifests.json` | Index of per-language symbols, context mechanisms, transports, tests, and promotion blockers |
+| `migration/test-repository-matrix.json` | Thirteen planned test repositories spanning twelve language/runtime entries |
+| `fixtures/manifest.json` | Positive and negative validation cases |
 
-All packages expose the same transport boundary: a transport receives one
-complete `next-loggers/v1` record and owns delivery. Each native SDK includes
-an explicit OpenTelemetry adapter and an authenticated-sender Supabase adapter;
-neither adapter installs global instrumentation.
+Every schema uses JSON Schema Draft 2020-12 and a canonical `$id` rooted at the new repository. The old `next-loggers/v1` discriminator is intentionally preserved so the repository move is not a wire-format break.
+
+## Logical API
+
+Each SDK manifest maps language-native symbols onto the same operations.
+
+- Logger: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `flush`, `flushOnExit`, and `close`.
+- Event: add fields, traces, routine IDs, tags, context, metadata, and users, then idempotent `send`.
+- Transport: `write`, `flush`, `flushOnExit`, and `close`.
+- Context: enter a scope, read/update it, apply it to a record, and run an explicit span.
+
+Method spelling remains idiomatic. The manifest records native symbols while JSON Schema enforces the logical operation set.
+
+## Runtime context strategies
+
+| SDK | Canonical strategy |
+| --- | --- |
+| Node.js/Bun/Deno | `AsyncLocalStorage` |
+| Browser/workerd | explicit context; ALS only when the runtime supplies it |
+| Python | `contextvars` |
+| Go | explicit `context.Context` value |
+| Rust | scoped thread-local plus explicit async task adapter |
+| Java | guarded `ThreadLocal` plus executor wrappers |
+| Dart/Flutter | `Zone` |
+| Erlang/Elixir/Gleam | scoped process dictionary |
+| Ruby | Fiber-local with thread fallback |
+| WASM | explicit host-owned context |
+
+No SDK may emulate goroutine-local storage, patch promises/timers, intercept module loading, replace `fetch`/console, or install an OTEL global provider.
+
+## OpenTelemetry guarantees
+
+The application owns OTEL SDK startup, context management, exporters, flushing, and shutdown. `ores.otel.log` wraps those application-owned objects behind its own logger and transport APIs.
+
+Every SDK manifest requires explicit instrumentation, logger calls as the application-facing API, no automatic instrumentation, no monkey patching, no provider ownership, sampled-out trace correlation before canonical promotion, and span events only for recording spans before canonical promotion.
+
+High-cardinality record, trace, span, request, and user identifiers stay in logs or structured metadata. They must not become Prometheus labels or Loki stream labels.
+
+## Compatibility and IDs
+
+New OTEL integrations should emit lowercase non-zero W3C IDs: 32 hexadecimal characters for trace IDs and 16 for span IDs. The `next-loggers/v1` schema still accepts legacy correlation IDs such as `trace-1` because deployed consumers already use them. OTEL adapters must reject zero IDs and malformed W3C tuples when converting to an OTEL span context.
+
+## Validation
+
+```sh
+python -m pip install jsonschema==4.26.0 referencing==0.37.0
+python scripts/validate-contracts.py
+```
+
+The validator checks schema validity, positive and negative fixtures, the exact eleven-SDK manifest set, source paths, explicit OTEL rules, no-monkey-patching patterns, promotion readiness, and the minimum ten-repository/seven-language test-org requirement.
+
+`promotion.ready` is deliberately false for SDKs whose context isolation or schema tests have not landed. Metadata cannot declare an SDK ready merely because its basic logger compiles.

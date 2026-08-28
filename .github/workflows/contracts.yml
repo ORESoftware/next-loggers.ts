@@ -1,0 +1,43 @@
+name: JSON Schema contracts
+
+on:
+  pull_request:
+    paths:
+      - contracts/**
+      - docs/api-consistency.md
+      - docs/ores-otel-migration.md
+      - scripts/validate-contracts.py
+      - scripts/plan-ores-otel-repositories.py
+      - .github/workflows/contracts.yml
+  push:
+    branches: [main]
+    paths:
+      - contracts/**
+      - docs/api-consistency.md
+      - docs/ores-otel-migration.md
+      - scripts/validate-contracts.py
+      - scripts/plan-ores-otel-repositories.py
+      - .github/workflows/contracts.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install pinned JSON Schema validator
+        run: python -m pip install --disable-pip-version-check jsonschema==4.26.0 referencing==0.37.0
+      - name: Validate schemas, fixtures, SDK manifests, and migration matrix
+        run: python scripts/validate-contracts.py

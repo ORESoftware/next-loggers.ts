@@ -61,4 +61,40 @@ defmodule ORESoftware.NextLoggersTest do
 
     assert traces == ["trace-a", "trace-b"]
   end
+
+  test "per-event OTEL routing preserves regular transports" do
+    parent = self()
+
+    logger =
+      NextLoggers.new("routing",
+        otel: false,
+        transports: [
+          NextLoggers.otel_transport(fn value -> send(parent, {:routed_otel, value}) end),
+          NextLoggers.supabase_transport(fn value -> send(parent, {:regular, value}) end)
+        ]
+      )
+
+    default_off = NextLoggers.event(logger, "INFO", "default-off")
+    refute NextLoggers.is_otel_enabled(default_off, logger.otel)
+    NextLoggers.send(default_off)
+    assert_receive {:regular, %{"message" => "default-off"}}
+    refute_receive {:routed_otel, _}, 10
+
+    logger
+    |> NextLoggers.event("INFO", "forced-on")
+    |> NextLoggers.use_otel()
+    |> NextLoggers.send()
+
+    assert_receive {:routed_otel, %{"body" => "forced-on"}}
+    assert_receive {:regular, %{"message" => "forced-on"}}
+
+    logger
+    |> NextLoggers.use_otel()
+    |> NextLoggers.event("WARN", "forced-off")
+    |> NextLoggers.not_otel()
+    |> NextLoggers.send()
+
+    assert_receive {:regular, %{"message" => "forced-off"}}
+    refute_receive {:routed_otel, _}, 10
+  end
 end

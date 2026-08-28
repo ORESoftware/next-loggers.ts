@@ -88,6 +88,14 @@ type Transport interface {
 	Write(LogRecord) error
 }
 
+type OpenTelemetryMarker interface {
+	IsOpenTelemetry() bool
+}
+
+type NamedTransport interface {
+	TransportName() string
+}
+
 type Flusher interface {
 	Flush() error
 }
@@ -161,6 +169,9 @@ func NewOpenTelemetryTransport(emit OpenTelemetryEmitter) *OpenTelemetryTranspor
 	return &OpenTelemetryTransport{Emit: emit}
 }
 
+func (transport *OpenTelemetryTransport) IsOpenTelemetry() bool { return true }
+func (transport *OpenTelemetryTransport) TransportName() string { return "opentelemetry" }
+
 func (transport *OpenTelemetryTransport) Write(record LogRecord) error {
 	if transport == nil || transport.Emit == nil {
 		return errors.New("nextloggers: OpenTelemetry emitter is required")
@@ -213,6 +224,7 @@ type Options struct {
 	Fields       map[string]any
 	LoggedInUser map[string]any
 	Transports   []Transport
+	Otel         *bool
 	Console      bool
 	Output       io.Writer
 	IDFactory    func() string
@@ -227,6 +239,7 @@ type Logger struct {
 	Fields        map[string]any
 	CurrentUser   map[string]any
 	Transports    []Transport
+	OtelEnabled   bool
 	Console       bool
 	Output        io.Writer
 	IDFactory     func() string
@@ -259,6 +272,10 @@ func NewLogger(options Options) *Logger {
 			return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		}
 	}
+	otelEnabled := true
+	if options.Otel != nil {
+		otelEnabled = *options.Otel
+	}
 	return &Logger{
 		AppName:       options.AppName,
 		Name:          options.Name,
@@ -267,6 +284,7 @@ func NewLogger(options Options) *Logger {
 		Fields:        cloneMap(options.Fields),
 		CurrentUser:   cloneMap(options.LoggedInUser),
 		Transports:    append([]Transport(nil), options.Transports...),
+		OtelEnabled:   otelEnabled,
 		Console:       options.Console,
 		Output:        options.Output,
 		IDFactory:     options.IDFactory,
@@ -349,6 +367,7 @@ type Event struct {
 	Context      []any
 	Meta         []any
 	StackTrace   []string
+	OtelEnabled  *bool
 
 	mu     sync.Mutex
 	sent   bool
@@ -398,11 +417,64 @@ func (logger *Logger) SetCurrentUser(user map[string]any) *Logger {
 	return logger
 }
 
+func (logger *Logger) SetOtelEnabled(enabled bool) *Logger {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	logger.OtelEnabled = enabled
+	return logger
+}
+
+func (logger *Logger) UseOtel() *Logger { return logger.SetOtelEnabled(true) }
+func (logger *Logger) NotOtel() *Logger { return logger.SetOtelEnabled(false) }
+
+func (logger *Logger) IsOtelEnabled() bool {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	return logger.OtelEnabled
+}
+
 func (event *Event) AddFields(fields map[string]any) *Event {
 	for key, value := range fields {
 		event.Fields[key] = value
 	}
 	return event
+}
+
+func (event *Event) WithOtel(enabled bool) *Event {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	event.OtelEnabled = new(bool)
+	*event.OtelEnabled = enabled
+	return event
+}
+
+func (event *Event) UseOtel() *Event { return event.WithOtel(true) }
+func (event *Event) NotOtel() *Event { return event.WithOtel(false) }
+
+func (event *Event) ResetOtel() *Event {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	event.OtelEnabled = nil
+	return event
+}
+
+func (event *Event) IsOtelEnabled(fallback bool) bool {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	if event.OtelEnabled == nil {
+		return fallback
+	}
+	return *event.OtelEnabled
+}
+
+func isOpenTelemetryTransport(transport Transport) bool {
+	if marked, ok := transport.(OpenTelemetryMarker); ok && marked.IsOpenTelemetry() {
+		return true
+	}
+	if named, ok := transport.(NamedTransport); ok {
+		return strings.EqualFold(named.TransportName(), "opentelemetry")
+	}
+	return false
 }
 
 func appendUnique(values []string, value string) []string {
@@ -570,6 +642,9 @@ func (logger *Logger) emit(event *Event, store bool) error {
 	}
 	var failures []error
 	for _, transport := range logger.Transports {
+		if isOpenTelemetryTransport(transport) && !event.IsOtelEnabled(logger.IsOtelEnabled()) {
+			continue
+		}
 		if err := transport.Write(record); err != nil {
 			failures = append(failures, err)
 		}

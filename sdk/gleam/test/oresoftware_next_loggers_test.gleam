@@ -1,7 +1,7 @@
 import gleam/erlang/process
 import gleam/json
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import oresoftware_next_loggers as logging
@@ -25,6 +25,8 @@ pub fn main() {
 
 fn transport(subject: process.Subject(Captured)) -> logging.Transport {
   logging.Transport(
+    name: None,
+    otel: False,
     write: fn(record) {
       process.send(subject, Written(record))
       Ok(Nil)
@@ -180,4 +182,54 @@ pub fn explicit_otel_and_supabase_transports_test() {
     process.receive(supabase_subject, within: 1000)
   record.schema |> should.equal("next-loggers/v1")
   record.message |> should.equal("cart updated")
+}
+
+pub fn per_event_otel_routing_test() {
+  let otel_subject = process.new_subject()
+  let otel_transport =
+    logging.otel_transport(fn(record) {
+      process.send(otel_subject, OtelWritten(record))
+      Ok(Nil)
+    })
+  let opt_in_logger =
+    logging.new(
+      logging.Options(..fixture_options(), otel: False),
+      otel_transport,
+    )
+
+  let assert Ok(_) =
+    logging.info(opt_in_logger, "default off", [])
+    |> logging.send
+  process.receive(otel_subject, within: 10)
+  |> should.equal(Error(Nil))
+
+  let assert Ok(_) =
+    logging.info(opt_in_logger, "forced on", [])
+    |> logging.event_use_otel
+    |> logging.send
+  let assert Ok(OtelWritten(forced)) =
+    process.receive(otel_subject, within: 1000)
+  forced.body |> should.equal("forced on")
+
+  let _unsent_default_off = logging.info(opt_in_logger, "unsent off", [])
+  logging.flush_on_exit(opt_in_logger)
+  |> should.equal(Ok(Nil))
+  process.receive(otel_subject, within: 10)
+  |> should.equal(Error(Nil))
+
+  let regular_subject = process.new_subject()
+  let regular_logger =
+    logging.new(fixture_options(), transport(regular_subject))
+  let assert Ok(_) =
+    logging.warn(regular_logger, "regular survives", [])
+    |> logging.event_not_otel
+    |> logging.send
+  let assert Ok(Written(regular)) =
+    process.receive(regular_subject, within: 1000)
+  regular.message |> should.equal("regular survives")
+
+  logging.info(logging.not_otel(opt_in_logger), "logger remains off", [])
+  |> logging.reset_otel
+  |> logging.is_otel_enabled(False)
+  |> should.be_false
 }

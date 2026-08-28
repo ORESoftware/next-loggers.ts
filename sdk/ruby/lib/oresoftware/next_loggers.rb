@@ -99,6 +99,9 @@ module ORESoftware
           }.freeze
         )
       end
+
+      def otel? = true
+      def name = "opentelemetry"
     end
 
     # Client-safe Supabase transport; the application supplies its sender.
@@ -114,6 +117,39 @@ module ORESoftware
       end
     end
 
+    class LogEvent
+      attr_reader :logger, :level, :message, :fields
+
+      def initialize(logger, level, message, fields = {})
+        @logger = logger
+        @level = level
+        @message = message
+        @fields = fields
+        @otel_enabled = nil
+      end
+
+      def use_otel = with_otel(true)
+      def not_otel = with_otel(false)
+
+      def with_otel(enabled)
+        @otel_enabled = !!enabled
+        self
+      end
+
+      def reset_otel
+        @otel_enabled = nil
+        self
+      end
+
+      def otel_enabled?(fallback)
+        @otel_enabled.nil? ? !!fallback : @otel_enabled
+      end
+
+      def send
+        logger.emit_event(self)
+      end
+    end
+
     class Logger
       def initialize(
         app_name:,
@@ -121,6 +157,7 @@ module ORESoftware
         runtime: "ruby",
         fields: {},
         transports: [],
+        otel: true,
         id_factory: -> { SecureRandom.uuid },
         clock: -> { Time.now.utc.iso8601(3) }
       )
@@ -133,13 +170,31 @@ module ORESoftware
         @runtime = runtime.to_s.strip.empty? ? "ruby" : runtime.to_s
         @fields = stringify_keys(fields).freeze
         @transports = Array(transports).freeze
+        @otel_enabled = !!otel
         @id_factory = id_factory
         @clock = clock
       end
 
       def log(level, message, fields = {})
-        level_name = level.to_s.upcase
-        raise ArgumentError, "unsupported level: #{level}" unless LEVELS.include?(level_name)
+        event(level, message, fields).send
+      end
+
+      def event(level, message, fields = {})
+        LogEvent.new(self, level, message, fields)
+      end
+
+      def set_otel_enabled(enabled)
+        @otel_enabled = !!enabled
+        self
+      end
+
+      def use_otel = set_otel_enabled(true)
+      def not_otel = set_otel_enabled(false)
+      def otel_enabled? = @otel_enabled
+
+      def emit_event(event)
+        level_name = event.level.to_s.upcase
+        raise ArgumentError, "unsupported level: #{event.level}" unless LEVELS.include?(level_name)
 
         context = NextLoggers.current_context
         merged_fields = @fields.merge(context&.fields || {})
@@ -148,10 +203,10 @@ module ORESoftware
           merged_fields["otel.trace_flags"] = context.trace_flags
           merged_fields["otel.trace_state"] = context.trace_state unless blank?(context.trace_state)
         end
-        merged_fields.merge!(stringify_keys(fields))
+        merged_fields.merge!(stringify_keys(event.fields))
         merged_fields.freeze
 
-        text = message.to_s
+        text = event.message.to_s
         record = {
           "schema" => SCHEMA,
           "id" => @id_factory.call.to_s,
@@ -172,6 +227,10 @@ module ORESoftware
         record.freeze
 
         @transports.each do |transport|
+          name = transport.respond_to?(:name) ? transport.name.to_s.downcase : ""
+          is_otel = (transport.respond_to?(:otel?) && transport.otel?) || name == "opentelemetry"
+          next if is_otel && !event.otel_enabled?(@otel_enabled)
+
           if transport.respond_to?(:write)
             transport.write(record)
           elsif transport.respond_to?(:call)

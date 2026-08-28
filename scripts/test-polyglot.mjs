@@ -15,9 +15,9 @@ const suites = [
     env: { PYTHONPATH: 'src' },
   },
   {
-    name: 'Go',
+    name: 'Go (race detector)',
     command: 'go',
-    args: ['test', './...'],
+    args: ['test', '-race', './...'],
     cwd: path.join(root, 'sdk', 'go'),
   },
   {
@@ -25,6 +25,18 @@ const suites = [
     command: 'cargo',
     args: ['test', '--locked'],
     cwd: path.join(root, 'sdk', 'rust'),
+  },
+  {
+    name: 'Rust context format',
+    command: 'cargo',
+    args: ['fmt', '--', '--check'],
+    cwd: path.join(root, 'sdk', 'rust-context'),
+  },
+  {
+    name: 'Rust thread/Tokio context',
+    command: 'cargo',
+    args: ['test', '--features', 'tokio'],
+    cwd: path.join(root, 'sdk', 'rust-context'),
   },
   {
     name: 'Gleam',
@@ -39,9 +51,21 @@ const suites = [
     cwd: path.join(root, 'sdk', 'java'),
   },
   {
-    name: 'Dart/Flutter',
+    name: 'Dart format',
+    command: 'dart',
+    args: ['format', '--output=none', '--set-exit-if-changed', 'lib', 'test'],
+    cwd: path.join(root, 'sdk', 'dart'),
+  },
+  {
+    name: 'Dart/Flutter wire conformance',
     command: 'dart',
     args: ['run', 'test/conformance.dart'],
+    cwd: path.join(root, 'sdk', 'dart'),
+  },
+  {
+    name: 'Dart/Flutter context and shutdown',
+    command: 'dart',
+    args: ['run', 'test/context_shutdown.dart'],
     cwd: path.join(root, 'sdk', 'dart'),
   },
   {
