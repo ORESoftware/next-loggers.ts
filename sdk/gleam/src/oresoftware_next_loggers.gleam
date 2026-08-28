@@ -43,8 +43,20 @@ pub type LogRecord {
   )
 }
 
+pub type OtelLogRecord {
+  OtelLogRecord(
+    body: String,
+    severity_text: String,
+    severity_number: Int,
+    timestamp: String,
+    attributes: JsonObject,
+  )
+}
+
 pub type Transport {
   Transport(
+    name: Option(String),
+    otel: Bool,
     write: fn(LogRecord) -> Result(Nil, String),
     flush: fn() -> Result(Nil, String),
     flush_on_exit: fn(List(LogRecord)) -> Result(Nil, String),
@@ -59,6 +71,7 @@ pub type Options {
     name: Option(String),
     minimum_level: Level,
     fields: JsonObject,
+    otel: Bool,
     id_generator: fn() -> String,
     clock: fn() -> String,
   )
@@ -69,22 +82,32 @@ pub opaque type Logger {
 }
 
 pub opaque type LogEvent {
-  LogEvent(subject: Subject(Message), record: LogRecord, sent: Bool)
+  LogEvent(
+    subject: Subject(Message),
+    record: LogRecord,
+    sent: Bool,
+    logger_otel: Bool,
+    otel_enabled: Option(Bool),
+  )
 }
 
 type State {
   State(
     transport: Transport,
-    pending: List(LogRecord),
+    pending: List(PendingRecord),
     closed: Bool,
     minimum_level: Level,
   )
 }
 
+type PendingRecord {
+  PendingRecord(record: LogRecord, otel_enabled: Bool)
+}
+
 type Message {
-  Track(LogRecord)
-  Update(LogRecord)
-  Send(LogRecord, Bool, Subject(Result(Bool, String)))
+  Track(LogRecord, Bool)
+  Update(LogRecord, Bool)
+  Send(LogRecord, Bool, Bool, Subject(Result(Bool, String)))
   Flush(Subject(Result(Nil, String)))
   FlushOnExit(Subject(Result(Nil, String)))
   Close(Subject(Result(Nil, String)))
@@ -102,6 +125,7 @@ pub fn options(
     name: None,
     minimum_level: Info,
     fields: [],
+    otel: True,
     id_generator:,
     clock:,
   )
@@ -109,10 +133,59 @@ pub fn options(
 
 pub fn noop_transport() -> Transport {
   Transport(
+    name: None,
+    otel: False,
     write: fn(_) { Ok(Nil) },
     flush: fn() { Ok(Nil) },
     flush_on_exit: fn(_) { Ok(Nil) },
     close: fn() { Ok(Nil) },
+  )
+}
+
+/// Adapt records to an application-owned OpenTelemetry emitter without
+/// installing a global provider or automatic instrumentation.
+pub fn otel_transport(
+  sink: fn(OtelLogRecord) -> Result(Nil, String),
+) -> Transport {
+  Transport(
+    name: Some("opentelemetry"),
+    otel: True,
+    write: fn(record) { sink(to_otel_record(record)) },
+    flush: fn() { Ok(Nil) },
+    flush_on_exit: fn(_) { Ok(Nil) },
+    close: fn() { Ok(Nil) },
+  )
+}
+
+/// Delegate records to an application-owned authenticated Supabase sender.
+pub fn supabase_transport(
+  sender: fn(LogRecord) -> Result(Nil, String),
+) -> Transport {
+  Transport(
+    name: Some("supabase"),
+    otel: False,
+    write: sender,
+    flush: fn() { Ok(Nil) },
+    flush_on_exit: fn(_) { Ok(Nil) },
+    close: fn() { Ok(Nil) },
+  )
+}
+
+pub fn to_otel_record(record: LogRecord) -> OtelLogRecord {
+  let base_attributes = [
+    #("service.name", json.string(record.app_name)),
+    #("next_logger.schema", json.string(record.schema)),
+    #("next_logger.runtime", json.string(record.runtime)),
+    #("log.record.uid", json.string(record.id)),
+  ]
+  let correlated = optional_string(base_attributes, "trace.id", record.trace_id)
+  let attributes = otel_field_attributes(record.fields, correlated)
+  OtelLogRecord(
+    body: record.message,
+    severity_text: level_name(record.level),
+    severity_number: otel_severity_number(record.level),
+    timestamp: record.timestamp,
+    attributes:,
   )
 }
 
@@ -128,6 +201,19 @@ pub fn new(options options: Options, transport transport: Transport) -> Logger {
     |> actor.start
 
   Logger(subject: started.data, options:)
+}
+
+pub fn set_otel_enabled(logger: Logger, enabled: Bool) -> Logger {
+  let Logger(subject:, options:) = logger
+  Logger(subject:, options: Options(..options, otel: enabled))
+}
+
+pub fn use_otel(logger: Logger) -> Logger {
+  set_otel_enabled(logger, True)
+}
+
+pub fn not_otel(logger: Logger) -> Logger {
+  set_otel_enabled(logger, False)
 }
 
 pub fn trace(logger: Logger, message: String, values: List(Json)) -> LogEvent {
@@ -161,8 +247,16 @@ fn event(
   values: List(Json),
 ) -> LogEvent {
   let Logger(subject:, options:) = logger
-  let Options(app_name:, runtime:, name:, fields:, id_generator:, clock:, ..) =
-    options
+  let Options(
+    app_name:,
+    runtime:,
+    name:,
+    fields:,
+    otel: logger_otel,
+    id_generator:,
+    clock:,
+    ..,
+  ) = options
   let record =
     LogRecord(
       schema:,
@@ -186,115 +280,143 @@ fn event(
       errors: [],
       stack_trace: [],
     )
-  actor.send(subject, Track(record))
-  LogEvent(subject:, record:, sent: False)
+  actor.send(subject, Track(record, logger_otel))
+  LogEvent(subject:, record:, sent: False, logger_otel:, otel_enabled: None)
 }
 
 pub fn add_fields(event: LogEvent, fields: JsonObject) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, fields: list.append(record.fields, fields)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(..record, fields: list.append(record.fields, fields)),
+    ),
+  )
 }
 
 pub fn add_user(event: LogEvent, user: JsonObject) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, users: list.append(record.users, [user])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(..record, users: list.append(record.users, [user])),
+    ),
+  )
 }
 
 pub fn set_logged_in_user(event: LogEvent, user: JsonObject) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, logged_in_user: Some(user)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(..event, record: LogRecord(..record, logged_in_user: Some(user))),
+  )
 }
 
 pub fn add_trace(event: LogEvent, trace_id: String) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
+  let LogEvent(record:, ..) = event
   let first_trace = case record.trace_id {
     Some(value) -> Some(value)
     None -> Some(trace_id)
   }
-  update(LogEvent(
-    subject:,
-    record: LogRecord(
-      ..record,
-      trace_id: first_trace,
-      trace_ids: list.append(record.trace_ids, [trace_id]),
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(
+        ..record,
+        trace_id: first_trace,
+        trace_ids: list.append(record.trace_ids, [trace_id]),
+      ),
     ),
-    sent:,
-  ))
+  )
 }
 
 pub fn add_routine_id(event: LogEvent, routine_id: String) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, routine_id: Some(routine_id)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(..event, record: LogRecord(..record, routine_id: Some(routine_id))),
+  )
 }
 
 pub fn add_tags(event: LogEvent, tags: List(String)) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, tags: list.append(record.tags, tags)),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(..record, tags: list.append(record.tags, tags)),
+    ),
+  )
 }
 
 pub fn add_context(event: LogEvent, value: Json) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, context: list.append(record.context, [value])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(..record, context: list.append(record.context, [value])),
+    ),
+  )
 }
 
 pub fn add_meta(event: LogEvent, value: Json) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, meta: list.append(record.meta, [value])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(..record, meta: list.append(record.meta, [value])),
+    ),
+  )
 }
 
 pub fn add_error(event: LogEvent, value: Json) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(..record, errors: list.append(record.errors, [value])),
-    sent:,
-  ))
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(..record, errors: list.append(record.errors, [value])),
+    ),
+  )
 }
 
 pub fn capture_stack_trace(event: LogEvent, stack_trace: String) -> LogEvent {
-  let LogEvent(subject:, record:, sent:) = event
-  update(LogEvent(
-    subject:,
-    record: LogRecord(
-      ..record,
-      stack_trace: list.append(record.stack_trace, [stack_trace]),
+  let LogEvent(record:, ..) = event
+  update(
+    LogEvent(
+      ..event,
+      record: LogRecord(
+        ..record,
+        stack_trace: list.append(record.stack_trace, [stack_trace]),
+      ),
     ),
-    sent:,
-  ))
+  )
 }
 
 fn update(event: LogEvent) -> LogEvent {
-  let LogEvent(subject:, record:, ..) = event
-  actor.send(subject, Update(record))
+  let LogEvent(subject:, record:, logger_otel:, ..) = event
+  actor.send(subject, Update(record, is_otel_enabled(event, logger_otel)))
   event
+}
+
+pub fn with_otel(event: LogEvent, enabled: Bool) -> LogEvent {
+  update(LogEvent(..event, otel_enabled: Some(enabled)))
+}
+
+pub fn event_use_otel(event: LogEvent) -> LogEvent {
+  with_otel(event, True)
+}
+
+pub fn event_not_otel(event: LogEvent) -> LogEvent {
+  with_otel(event, False)
+}
+
+pub fn reset_otel(event: LogEvent) -> LogEvent {
+  update(LogEvent(..event, otel_enabled: None))
+}
+
+pub fn is_otel_enabled(event: LogEvent, fallback: Bool) -> Bool {
+  let LogEvent(otel_enabled:, ..) = event
+  case otel_enabled {
+    Some(enabled) -> enabled
+    None -> fallback
+  }
 }
 
 pub fn send(event: LogEvent) -> Result(LogEvent, String) {
@@ -305,12 +427,13 @@ pub fn send_with_store(
   event: LogEvent,
   store: Bool,
 ) -> Result(LogEvent, String) {
-  let LogEvent(subject:, record:, sent:) = event
+  let LogEvent(subject:, record:, sent:, logger_otel:, ..) = event
   case sent {
     True -> Ok(event)
     False -> {
-      case actor.call(subject, 5000, Send(record, store, _)) {
-        Ok(was_sent) -> Ok(LogEvent(subject:, record:, sent: was_sent))
+      let otel_enabled = is_otel_enabled(event, logger_otel)
+      case actor.call(subject, 5000, Send(record, store, otel_enabled, _)) {
+        Ok(was_sent) -> Ok(LogEvent(..event, sent: was_sent))
         Error(reason) -> Error(reason)
       }
     }
@@ -383,17 +506,51 @@ pub fn level_name(level: Level) -> String {
   }
 }
 
+pub fn otel_severity_number(level: Level) -> Int {
+  case level {
+    Trace -> 1
+    Debug -> 5
+    Info -> 9
+    Warn -> 13
+    ErrorLevel -> 17
+    Fatal -> 21
+  }
+}
+
+fn otel_field_attributes(
+  fields: JsonObject,
+  attributes: JsonObject,
+) -> JsonObject {
+  case fields {
+    [] -> attributes
+    [#(key, value), ..rest] ->
+      otel_field_attributes(
+        rest,
+        list.append(attributes, [#("next_logger.field." <> key, value)]),
+      )
+  }
+}
+
+fn is_otel_transport(transport: Transport) -> Bool {
+  let Transport(name:, otel:, ..) = transport
+  otel || name == Some("opentelemetry")
+}
+
 fn handle_message(
   state: State,
   message: Message,
 ) -> actor.Next(State, Message) {
   let State(transport:, pending:, closed:, minimum_level:) = state
   case message {
-    Track(record) ->
-      actor.continue(State(..state, pending: [record, ..pending]))
-    Update(record) ->
-      actor.continue(State(..state, pending: replace_record(pending, record)))
-    Send(record, store, reply) -> {
+    Track(record, otel_enabled) ->
+      actor.continue(
+        State(..state, pending: [PendingRecord(record, otel_enabled), ..pending]),
+      )
+    Update(record, otel_enabled) ->
+      actor.continue(
+        State(..state, pending: replace_record(pending, record, otel_enabled)),
+      )
+    Send(record, store, otel_enabled, reply) -> {
       case closed {
         True -> {
           process.send(reply, Error("logger is closed"))
@@ -401,7 +558,11 @@ fn handle_message(
         }
         False -> {
           let enabled = level_rank(record.level) >= level_rank(minimum_level)
-          case store && enabled {
+          let should_write =
+            store
+            && enabled
+            && { !is_otel_transport(transport) || otel_enabled }
+          case should_write {
             False -> {
               process.send(reply, Ok(True))
               actor.continue(
@@ -419,7 +580,10 @@ fn handle_message(
                 Error(reason) -> {
                   process.send(reply, Error(reason))
                   actor.continue(
-                    State(..state, pending: replace_record(pending, record)),
+                    State(
+                      ..state,
+                      pending: replace_record(pending, record, otel_enabled),
+                    ),
                   )
                 }
               }
@@ -454,12 +618,23 @@ fn handle_message(
 
 fn drain(
   transport: Transport,
-  records: List(LogRecord),
+  records: List(PendingRecord),
 ) -> Result(Nil, String) {
-  case write_all(transport, list.reverse(records)) {
+  let routed =
+    records
+    |> list.reverse
+    |> list.filter(fn(pending) {
+      let PendingRecord(otel_enabled:, ..) = pending
+      !is_otel_transport(transport) || otel_enabled
+    })
+    |> list.map(fn(pending) {
+      let PendingRecord(record:, ..) = pending
+      record
+    })
+  case write_all(transport, routed) {
     Error(reason) -> Error(reason)
     Ok(Nil) -> {
-      case transport.flush_on_exit(list.reverse(records)) {
+      case transport.flush_on_exit(routed) {
         Error(reason) -> Error(reason)
         Ok(Nil) -> transport.flush()
       }
@@ -482,18 +657,27 @@ fn write_all(
   }
 }
 
-fn replace_record(records: List(LogRecord), replacement: LogRecord) {
+fn replace_record(
+  records: List(PendingRecord),
+  replacement: LogRecord,
+  otel_enabled: Bool,
+) {
   records
-  |> list.map(fn(record) {
+  |> list.map(fn(pending) {
+    let PendingRecord(record:, ..) = pending
     case record.id == replacement.id {
-      True -> replacement
-      False -> record
+      True -> PendingRecord(replacement, otel_enabled)
+      False -> pending
     }
   })
 }
 
-fn remove_record(records: List(LogRecord), id: String) {
-  records |> list.filter(fn(record) { record.id != id })
+fn remove_record(records: List(PendingRecord), id: String) {
+  records
+  |> list.filter(fn(pending) {
+    let PendingRecord(record:, ..) = pending
+    record.id != id
+  })
 }
 
 fn level_rank(level: Level) -> Int {

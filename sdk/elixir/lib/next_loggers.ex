@@ -21,6 +21,7 @@ defmodule ORESoftware.NextLoggers do
       runtime: Keyword.get(opts, :runtime, "elixir"),
       fields: Map.new(Keyword.get(opts, :fields, %{})),
       transports: List.wrap(Keyword.get(opts, :transports, [])),
+      otel: Keyword.get(opts, :otel, true),
       id_factory: Keyword.get(opts, :id_factory, &default_id/0),
       clock: Keyword.get(opts, :clock, &default_clock/0)
     }
@@ -49,7 +50,46 @@ defmodule ORESoftware.NextLoggers do
 
   def log(logger, level, message, event_fields)
       when is_map(logger) and is_binary(level) and is_binary(message) and is_map(event_fields) do
-    context = current_context()
+    logger
+    |> event(level, message, event_fields)
+    |> send()
+  end
+
+  def event(logger, level, message, event_fields \\ %{})
+      when is_map(logger) and is_binary(level) and is_binary(message) and is_map(event_fields) do
+    %{
+      kind: :event,
+      logger: logger,
+      level: level,
+      message: message,
+      fields: event_fields,
+      context: current_context(),
+      otel_enabled: nil
+    }
+  end
+
+  def set_otel_enabled(logger, enabled) when is_map(logger) and is_boolean(enabled),
+    do: Map.put(logger, :otel, enabled)
+
+  def use_otel(%{kind: :event} = event), do: with_otel(event, true)
+  def use_otel(logger) when is_map(logger), do: set_otel_enabled(logger, true)
+  def not_otel(%{kind: :event} = event), do: with_otel(event, false)
+  def not_otel(logger) when is_map(logger), do: set_otel_enabled(logger, false)
+
+  def with_otel(%{kind: :event} = event, enabled) when is_boolean(enabled),
+    do: Map.put(event, :otel_enabled, enabled)
+
+  def reset_otel(%{kind: :event} = event), do: Map.put(event, :otel_enabled, nil)
+
+  def is_otel_enabled(%{kind: :event, otel_enabled: nil}, fallback), do: !!fallback
+  def is_otel_enabled(%{kind: :event, otel_enabled: enabled}, _fallback), do: enabled
+
+  def send(%{kind: :event} = event) do
+    logger = event.logger
+    level = event.level
+    message = event.message
+    event_fields = event.fields
+    context = event.context
 
     fields =
       logger.fields
@@ -79,9 +119,11 @@ defmodule ORESoftware.NextLoggers do
       |> maybe_put_tags(Map.get(context, :tags, []))
 
     Enum.each(logger.transports, fn transport ->
-      case transport.(record) do
-        :ok -> :ok
-        other -> raise "transport returned #{inspect(other)}"
+      unless otel_transport?(transport) and not is_otel_enabled(event, logger.otel) do
+        case deliver_transport(transport, record) do
+          :ok -> :ok
+          other -> raise "transport returned #{inspect(other)}"
+        end
       end
     end)
 
@@ -89,7 +131,7 @@ defmodule ORESoftware.NextLoggers do
   end
 
   def otel_transport(sink) when is_function(sink, 1) do
-    fn record ->
+    {:opentelemetry, fn record ->
       attributes =
         %{
           "service.name" => record["appName"],
@@ -113,15 +155,23 @@ defmodule ORESoftware.NextLoggers do
       })
 
       :ok
-    end
+    end}
   end
 
   def supabase_transport(sender) when is_function(sender, 1) do
-    fn record ->
+    {:supabase, fn record ->
       sender.(record)
       :ok
-    end
+    end}
   end
+
+  defp otel_transport?({name, _transport}) when name in [:opentelemetry, "opentelemetry"], do: true
+  defp otel_transport?(_transport), do: false
+
+  defp deliver_transport({_name, transport}, record) when is_function(transport, 1),
+    do: transport.(record)
+
+  defp deliver_transport(transport, record) when is_function(transport, 1), do: transport.(record)
 
   defp maybe_put_trace_ids(map, nil), do: map
   defp maybe_put_trace_ids(map, ""), do: map

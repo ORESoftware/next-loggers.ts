@@ -4,7 +4,8 @@
  * A one-way check is what lets a contract rot: it catches a flag the TOML
  * forgot but not one the TOML still claims after the code dropped it. Shared
  * by `next-loggers flags --check` and tests/cli-flags.test.mjs so CI and
- * consumers run identical logic.
+ * consumers run identical logic. Help text is part of the contract too: the
+ * canonical flags-2-env CLI renders it directly into docs and completions.
  */
 
 import { asTable, parseToml, type TomlTable, type TomlValue } from './toml.js';
@@ -18,6 +19,12 @@ export interface DeclaredFlag {
   short?: string;
   type: string;
   default?: string;
+  help: string;
+}
+
+export interface DeclaredCommand {
+  name: string;
+  help: string;
 }
 
 export interface DriftReport {
@@ -27,6 +34,7 @@ export interface DriftReport {
   mismatched: string[];
   missingCommands: string[];
   staleCommands: string[];
+  mismatchedCommands: string[];
   policyViolations: string[];
 }
 
@@ -49,7 +57,11 @@ function readFlagTable(scope: string, key: string, table: TomlTable): DeclaredFl
   if (typeof type !== 'string') {
     throw new Error(`[${scope}.flags.${key}] is missing a string "type"`);
   }
-  const flag: DeclaredFlag = { scope, key, env, aliases, type };
+  const help = table.help;
+  if (typeof help !== 'string') {
+    throw new Error(`[${scope}.flags.${key}] is missing a string "help"`);
+  }
+  const flag: DeclaredFlag = { scope, key, env, aliases, type, help };
   if (typeof table.short === 'string') {
     flag.short = table.short;
   }
@@ -62,10 +74,10 @@ function readFlagTable(scope: string, key: string, table: TomlTable): DeclaredFl
 /** Collects every `flags.<key>` table at any depth, including command scopes. */
 export function collectDeclared(document: TomlTable): {
   flags: DeclaredFlag[];
-  commands: string[];
+  commands: DeclaredCommand[];
 } {
   const flags: DeclaredFlag[] = [];
-  const commands: string[] = [];
+  const commands: DeclaredCommand[] = [];
 
   const walkFlags = (scope: string, node: TomlValue | undefined): void => {
     if (node === undefined) {
@@ -83,8 +95,18 @@ export function collectDeclared(document: TomlTable): {
   if (commandsTable !== undefined) {
     const table = asTable(commandsTable, 'commands');
     for (const [name, value] of Object.entries(table)) {
-      commands.push(name);
       const commandTable = asTable(value, `commands.${name}`);
+      const allowed = new Set(['help', 'flags']);
+      for (const found of Object.keys(commandTable)) {
+        if (!allowed.has(found)) {
+          throw new Error(`[commands.${name}] has unknown key "${found}"`);
+        }
+      }
+      const help = commandTable.help;
+      if (typeof help !== 'string') {
+        throw new Error(`[commands.${name}] is missing a string "help"`);
+      }
+      commands.push({ name, help });
       walkFlags(name, commandTable.flags);
       if (commandTable.commands !== undefined) {
         throw new Error(`nested subcommands under "${name}" are not supported by this CLI`);
@@ -112,6 +134,7 @@ function toDeclared(scope: string, flag: FlagSpec): DeclaredFlag {
     env: flag.env,
     aliases: [...flag.aliases],
     type: flag.type,
+    help: flag.help,
   };
   if (flag.short !== undefined) {
     declared.short = flag.short;
@@ -158,6 +181,9 @@ export function compare(document: TomlTable): DriftReport {
     if ((other.default ?? '') !== (flag.default ?? '')) {
       mismatched.push(`${key}: default "${other.default ?? ''}" vs "${flag.default ?? ''}"`);
     }
+    if (other.help !== flag.help) {
+      mismatched.push(`${key}: help ${JSON.stringify(other.help)} vs ${JSON.stringify(flag.help)}`);
+    }
   }
   for (const key of declaredByIdentity.keys()) {
     if (!compiledByIdentity.has(key)) {
@@ -165,10 +191,23 @@ export function compare(document: TomlTable): DriftReport {
     }
   }
 
-  const compiledCommands = COMMANDS.map((command) => command.name).sort();
-  const declaredCommands = [...declared.commands].sort();
-  const missingCommands = compiledCommands.filter((name) => !declaredCommands.includes(name));
-  const staleCommands = declaredCommands.filter((name) => !compiledCommands.includes(name));
+  const compiledCommands = new Map(COMMANDS.map((command) => [command.name, command]));
+  const declaredCommands = new Map(declared.commands.map((command) => [command.name, command]));
+  const missingCommands = [...compiledCommands.keys()]
+    .filter((name) => !declaredCommands.has(name))
+    .sort();
+  const staleCommands = [...declaredCommands.keys()]
+    .filter((name) => !compiledCommands.has(name))
+    .sort();
+  const mismatchedCommands: string[] = [];
+  for (const [name, command] of compiledCommands) {
+    const other = declaredCommands.get(name);
+    if (other && other.help !== command.summary) {
+      mismatchedCommands.push(
+        `${name}: help ${JSON.stringify(other.help)} vs ${JSON.stringify(command.summary)}`,
+      );
+    }
+  }
 
   // Policy: no flag whose env is consumed by envToLoggerOptions() may declare a
   // default, or the default would fabricate configuration the user never set.
@@ -199,12 +238,14 @@ export function compare(document: TomlTable): DriftReport {
       mismatched.length === 0 &&
       missingCommands.length === 0 &&
       staleCommands.length === 0 &&
+      mismatchedCommands.length === 0 &&
       policyViolations.length === 0,
     missing,
     stale,
     mismatched,
     missingCommands,
     staleCommands,
+    mismatchedCommands,
     policyViolations,
   };
 }

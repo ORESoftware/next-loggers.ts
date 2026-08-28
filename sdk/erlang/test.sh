@@ -2,9 +2,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")" && pwd)
-out="$root/.build"
-rm -rf "$out"
-mkdir -p "$out"
+out=$(mktemp -d "${TMPDIR:-/tmp}/next-loggers-erlang.XXXXXX")
 erlc -Werror -o "$out" \
   "$root/src/next_loggers.erl" \
   "$root/test/next_loggers_tests.erl" \
