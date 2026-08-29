@@ -43,7 +43,6 @@ fn transport(subject: process.Subject(Captured)) -> logging.Transport {
       process.send(subject, Closed)
       Ok(Nil)
     },
-    is_otel: False,
   )
 }
 
@@ -186,54 +185,6 @@ pub fn explicit_otel_and_supabase_transports_test() {
 }
 
 pub fn per_event_otel_routing_test() {
-<<<<<<< HEAD
-  let subject = process.new_subject()
-  let transport =
-    logging.otel_transport(fn(record) {
-      process.send(subject, OtelWritten(record))
-      Ok(Nil)
-    })
-  let logger = logging.new(fixture_options(), transport)
-
-  let assert Ok(_) =
-    logging.info(logger, "default on", [])
-    |> logging.send
-  let assert Ok(_) =
-    logging.warn(logger, "opted out", [])
-    |> logging.not_otel
-    |> logging.send
-  let assert Ok(_) =
-    logging.error(logger, "opted back in", [])
-    |> logging.not_otel
-    |> logging.use_otel
-    |> logging.send
-
-  let assert Ok(OtelWritten(first)) = process.receive(subject, within: 1000)
-  first.body |> should.equal("default on")
-  let assert Ok(OtelWritten(second)) = process.receive(subject, within: 1000)
-  second.body |> should.equal("opted back in")
-  process.receive(subject, within: 50) |> should.be_error
-
-  // otel: False makes OpenTelemetry opt-in per event.
-  let opt_in_options = logging.Options(..fixture_options(), otel: False)
-  let opt_in = logging.new(opt_in_options, transport)
-  let assert Ok(_) =
-    logging.info(opt_in, "skipped", [])
-    |> logging.send
-  process.receive(subject, within: 50) |> should.be_error
-  let assert Ok(_) =
-    logging.info(opt_in, "selected", [])
-    |> logging.use_otel
-    |> logging.send
-  let assert Ok(OtelWritten(third)) = process.receive(subject, within: 1000)
-  third.body |> should.equal("selected")
-  let assert Ok(_) =
-    logging.info(opt_in, "reset follows default", [])
-    |> logging.use_otel
-    |> logging.reset_otel
-    |> logging.send
-  process.receive(subject, within: 50) |> should.be_error
-=======
   let otel_subject = process.new_subject()
   let otel_transport =
     logging.otel_transport(fn(record) {
@@ -281,5 +232,59 @@ pub fn per_event_otel_routing_test() {
   |> logging.reset_otel
   |> logging.is_otel_enabled(False)
   |> should.be_false
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
+}
+
+pub fn call_site_otel_routing_test() {
+  let otel_subject = process.new_subject()
+  let otel_transport =
+    logging.otel_transport(fn(record) {
+      process.send(otel_subject, OtelWritten(record))
+      Ok(Nil)
+    })
+  let otel_logger = logging.new(fixture_options(), otel_transport)
+  let assert Ok(_) =
+    logging.error(otel_logger, "payment failed", [
+      json.string("payment failed"),
+    ])
+    |> logging.add_trace("0123456789abcdef0123456789abcdef")
+    |> logging.add_fields([
+      #("otel.span_id", json.string("0123456789abcdef")),
+      #("region", json.string("us-east-1")),
+    ])
+    |> logging.send
+
+  let assert Ok(OtelWritten(otel)) = process.receive(otel_subject, within: 1000)
+  let logging.OtelLogRecord(
+    body:,
+    severity_text:,
+    severity_number:,
+    attributes:,
+    ..,
+  ) = otel
+  body |> should.equal("payment failed")
+  severity_text |> should.equal("ERROR")
+  severity_number |> should.equal(17)
+  attributes
+  |> json.object
+  |> json.to_string
+  |> should.equal(
+    "{\"service.name\":\"payments\",\"next_logger.schema\":\"next-loggers/v1\",\"next_logger.runtime\":\"contract-test\",\"log.record.uid\":\"contract-record-1\",\"trace.id\":\"0123456789abcdef0123456789abcdef\",\"next_logger.field.environment\":\"test\",\"next_logger.field.otel.span_id\":\"0123456789abcdef\",\"next_logger.field.region\":\"us-east-1\"}",
+  )
+
+  let supabase_subject = process.new_subject()
+  let supabase_transport =
+    logging.supabase_transport(fn(record) {
+      process.send(supabase_subject, SupabaseWritten(record))
+      Ok(Nil)
+    })
+  let supabase_logger = logging.new(fixture_options(), supabase_transport)
+  let assert Ok(_) =
+    logging.info(supabase_logger, "cart updated", [
+      json.string("cart updated"),
+    ])
+    |> logging.send
+  let assert Ok(SupabaseWritten(record)) =
+    process.receive(supabase_subject, within: 1000)
+  record.schema |> should.equal("next-loggers/v1")
+  record.message |> should.equal("cart updated")
 }

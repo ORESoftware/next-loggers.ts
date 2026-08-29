@@ -1,7 +1,6 @@
 import type {
   LogContextProvider,
   LogLevel,
-  LoggerOptions,
   LogRecord,
   LogTransport,
   LoggerOptions,
@@ -466,10 +465,7 @@ export function createOpenTelemetryContextProvider(
  */
 export class OpenTelemetryTransport implements LogTransport {
   readonly name = 'opentelemetry';
-<<<<<<< HEAD
   /** Lets per-event useOtel()/notOtel() route around this transport. */
-=======
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   readonly otel = true;
 
   constructor(private readonly options: OpenTelemetryTransportOptions) {
@@ -572,7 +568,6 @@ export function createOpenTelemetryTransport(
   return new OpenTelemetryTransport(options);
 }
 
-<<<<<<< HEAD
 export interface OpenTelemetryBridgeOptions extends OpenTelemetryTransportOptions {
   /**
    * Default routing for the OTEL transport. Defaults to true; pass false to
@@ -631,33 +626,5 @@ export function withOpenTelemetry<TOptions extends LoggerOptions>(
     transports,
     ...(contextProvider ? { contextProvider } : {}),
     ...(bridge.otel === undefined ? {} : { otel: bridge.otel }),
-=======
-/**
- * Add the explicit OpenTelemetry bridge without replacing existing transports
- * or an application-supplied context provider. When `activeSpan` is present,
- * span correlation is installed automatically unless the caller already chose
- * a provider.
- */
-export function withOpenTelemetry(
-  loggerOptions: LoggerOptions,
-  bridge: OpenTelemetryTransportOptions,
-): LoggerOptions {
-  const existing = loggerOptions.transports
-    ? Array.isArray(loggerOptions.transports)
-      ? loggerOptions.transports
-      : [loggerOptions.transports]
-    : [];
-  const contextProvider =
-    loggerOptions.contextProvider ??
-    (bridge.activeSpan
-      ? createOpenTelemetryContextProvider(bridge.activeSpan, {
-          ...(bridge.onBridgeError ? { onBridgeError: bridge.onBridgeError } : {}),
-        })
-      : undefined);
-  return {
-    ...loggerOptions,
-    transports: [...existing, createOpenTelemetryTransport(bridge)],
-    ...(contextProvider ? { contextProvider } : {}),
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   };
 }

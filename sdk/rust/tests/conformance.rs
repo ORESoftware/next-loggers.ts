@@ -162,7 +162,71 @@ fn explicit_opentelemetry_and_supabase_transports_work() {
 }
 
 #[test]
-<<<<<<< HEAD
+fn per_event_opentelemetry_routing_preserves_regular_transports() {
+    let otel = Arc::new(Mutex::new(Vec::<OpenTelemetryLogRecord>::new()));
+    let otel_sink = otel.clone();
+    let regular = Arc::new(MemoryTransport::default());
+    let logger = Logger::new(Options {
+        otel: false,
+        console: false,
+        transports: vec![
+            Arc::new(OpenTelemetryTransport::new(move |record| {
+                otel_sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+            regular.clone() as Arc<dyn Transport>,
+        ],
+        ..Options::default()
+    });
+
+    let default_off = logger.info(vec![json!("default-off")]);
+    assert!(!default_off.is_otel_enabled(logger.is_otel_enabled()));
+    default_off.send().unwrap();
+    logger
+        .info(vec![json!("forced-on")])
+        .use_otel()
+        .send()
+        .unwrap();
+    logger
+        .info(vec![json!("reset-off")])
+        .use_otel()
+        .reset_otel()
+        .send()
+        .unwrap();
+    logger.use_otel();
+    logger
+        .warn(vec![json!("forced-off")])
+        .not_otel()
+        .send()
+        .unwrap();
+    logger
+        .info(vec![json!("logger-on")])
+        .with_otel(true)
+        .send()
+        .unwrap();
+
+    let otel = otel.lock().unwrap();
+    assert_eq!(otel.len(), 2);
+    assert_eq!(otel[0].body, "forced-on");
+    assert_eq!(otel[1].body, "logger-on");
+    drop(otel);
+    assert_eq!(
+        regular
+            .records()
+            .into_iter()
+            .map(|record| record.message)
+            .collect::<Vec<_>>(),
+        [
+            "default-off",
+            "forced-on",
+            "reset-off",
+            "forced-off",
+            "logger-on"
+        ]
+    );
+}
+
+#[test]
 fn per_event_otel_routing_skips_only_otel_transports() {
     let emitted: Arc<Mutex<Vec<OpenTelemetryLogRecord>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = emitted.clone();
@@ -239,68 +303,4 @@ fn per_event_otel_routing_skips_only_otel_transports() {
         .map(|record| record.body.clone())
         .collect();
     assert_eq!(bodies, vec!["selected", "default flipped"]);
-=======
-fn per_event_opentelemetry_routing_preserves_regular_transports() {
-    let otel = Arc::new(Mutex::new(Vec::<OpenTelemetryLogRecord>::new()));
-    let otel_sink = otel.clone();
-    let regular = Arc::new(MemoryTransport::default());
-    let logger = Logger::new(Options {
-        otel: false,
-        console: false,
-        transports: vec![
-            Arc::new(OpenTelemetryTransport::new(move |record| {
-                otel_sink.lock().unwrap().push(record);
-                Ok(())
-            })) as Arc<dyn Transport>,
-            regular.clone() as Arc<dyn Transport>,
-        ],
-        ..Options::default()
-    });
-
-    let default_off = logger.info(vec![json!("default-off")]);
-    assert!(!default_off.is_otel_enabled(logger.is_otel_enabled()));
-    default_off.send().unwrap();
-    logger
-        .info(vec![json!("forced-on")])
-        .use_otel()
-        .send()
-        .unwrap();
-    logger
-        .info(vec![json!("reset-off")])
-        .use_otel()
-        .reset_otel()
-        .send()
-        .unwrap();
-    logger.use_otel();
-    logger
-        .warn(vec![json!("forced-off")])
-        .not_otel()
-        .send()
-        .unwrap();
-    logger
-        .info(vec![json!("logger-on")])
-        .with_otel(true)
-        .send()
-        .unwrap();
-
-    let otel = otel.lock().unwrap();
-    assert_eq!(otel.len(), 2);
-    assert_eq!(otel[0].body, "forced-on");
-    assert_eq!(otel[1].body, "logger-on");
-    drop(otel);
-    assert_eq!(
-        regular
-            .records()
-            .into_iter()
-            .map(|record| record.message)
-            .collect::<Vec<_>>(),
-        [
-            "default-off",
-            "forced-on",
-            "reset-off",
-            "forced-off",
-            "logger-on"
-        ]
-    );
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
 }

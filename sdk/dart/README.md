@@ -15,23 +15,6 @@ final record = await withLogContext(
 );
 ```
 
-<<<<<<< HEAD
-## OpenTelemetry on or off, per call
-
-`OpenTelemetryTransport` implements `OtelBridgeTransport`, so a record can skip
-it without touching the OTEL SDK:
-
-```dart
-await logger.info('charged', otel: true);
-await logger.warn('noisy poll', otel: false);  // other transports still receive it
-await logger.notOtel().error('local only');    // derived logger
-```
-
-The `otel:` constructor argument sets the default; `useOtel()` / `notOtel()`
-return a derived logger. Delivery happens at the call, so there is no unsent
-event — but the call returns a `Future`, so enable the analyzer's
-`unawaited_futures` lint to catch one that is never awaited.
-=======
 ## Per-event OpenTelemetry routing
 
 `Logger(otel: true)` is the default. Existing immediate methods remain
@@ -47,4 +30,15 @@ await log.event(LogLevel.info, 'computed').withOtel(routeToOtel).send();
 `resetOtel()` restores the logger default and `isOtelEnabled(fallback)`
 resolves it. Logger `setOtelEnabled`, `useOtel`, and `notOtel` update the
 default. Other transports still receive records excluded from OTEL.
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
+
+Dart's level methods are named-argument based, so they also carry the same
+decision at the call site without a builder:
+
+```dart
+await logger.info('charged', otel: true);
+await logger.warn('noisy poll', otel: false);  // other transports still receive it
+```
+
+The call-site form delivers immediately, so it leaves no unsent event; the
+`event(...).send()` form returns a `Future`, so enable the analyzer's
+`unawaited_futures` lint to catch a chain that is never awaited.

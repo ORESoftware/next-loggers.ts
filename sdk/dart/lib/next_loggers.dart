@@ -176,20 +176,9 @@ abstract interface class LogTransport {
   FutureOr<void> write(Map<String, Object?> record);
 }
 
-<<<<<<< HEAD
-/// Marker for OpenTelemetry bridge transports so `Logger.notOtel()` and the
-/// per-call `otel:` argument can route around them. A hand-rolled OTEL
-/// transport should implement this alongside [LogTransport].
-abstract interface class OtelBridgeTransport implements LogTransport {}
-
-/// Application-owned OTEL sink. This package never registers a global SDK.
-final class OpenTelemetryTransport implements LogTransport, OtelBridgeTransport {
-  OpenTelemetryTransport(this.emit);
-=======
 abstract interface class FlushableLogTransport {
   FutureOr<void> flush();
 }
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
 
 abstract interface class ExitFlushableLogTransport {
   FutureOr<void> flushOnExit(List<Map<String, Object?>> recoveredRecords);
@@ -300,6 +289,9 @@ class Logger {
   Logger notOtel() => setOtelEnabled(false);
   bool isOtelEnabled() => otel;
 
+  /// Chainable form: `logger.event(LogLevel.info, 'm').notOtel().send()`.
+  /// The immediate level methods take `otel:` for the same decision at the
+  /// call site; `useOtel()`/`notOtel()` set the logger-wide default.
   LogEvent event(
     LogLevel level,
     String message, {
@@ -311,25 +303,53 @@ class Logger {
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.trace, message, fields: fields, values: values);
+    bool? otel,
+  }) => log(
+    LogLevel.trace,
+    message,
+    fields: fields,
+    values: values,
+    otelEnabled: otel,
+  );
 
   Future<Map<String, Object?>> debug(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.debug, message, fields: fields, values: values);
+    bool? otel,
+  }) => log(
+    LogLevel.debug,
+    message,
+    fields: fields,
+    values: values,
+    otelEnabled: otel,
+  );
 
   Future<Map<String, Object?>> info(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.info, message, fields: fields, values: values);
+    bool? otel,
+  }) => log(
+    LogLevel.info,
+    message,
+    fields: fields,
+    values: values,
+    otelEnabled: otel,
+  );
 
   Future<Map<String, Object?>> warn(
     String message, {
     Map<String, Object?> fields = const <String, Object?>{},
     List<Object?> values = const <Object?>[],
-  }) => log(LogLevel.warn, message, fields: fields, values: values);
+    bool? otel,
+  }) => log(
+    LogLevel.warn,
+    message,
+    fields: fields,
+    values: values,
+    otelEnabled: otel,
+  );
 
   Future<Map<String, Object?>> error(
     String message, {
@@ -337,6 +357,7 @@ class Logger {
     List<Object?> values = const <Object?>[],
     Object? error,
     StackTrace? stackTrace,
+    bool? otel,
   }) => log(
     LogLevel.error,
     message,
@@ -346,6 +367,7 @@ class Logger {
     stackTrace: stackTrace == null
         ? const <String>[]
         : <String>[stackTrace.toString()],
+     otelEnabled: otel,
   );
 
   Future<Map<String, Object?>> fatal(
@@ -354,6 +376,7 @@ class Logger {
     List<Object?> values = const <Object?>[],
     Object? error,
     StackTrace? stackTrace,
+    bool? otel,
   }) => log(
     LogLevel.fatal,
     message,
@@ -363,6 +386,7 @@ class Logger {
     stackTrace: stackTrace == null
         ? const <String>[]
         : <String>[stackTrace.toString()],
+     otelEnabled: otel,
   );
 
   Future<Map<String, Object?>> log(
@@ -561,127 +585,6 @@ class SupabaseTransport implements LogTransport {
       insert(_recordCopy(record));
 }
 
-<<<<<<< HEAD
-final class Logger {
-  Logger({
-    required this.appName,
-    this.name,
-    this.runtime = 'dart',
-    Map<String, Object?> fields = const <String, Object?>{},
-    List<LogTransport> transports = const <LogTransport>[],
-    this.otel = true,
-    String Function()? idFactory,
-    String Function()? clock,
-  })  : fields = Map.unmodifiable(fields),
-        transports = List.unmodifiable(transports),
-        _idFactory = idFactory ?? _randomId,
-        _clock = clock ?? (() => DateTime.now().toUtc().toIso8601String());
-
-  final String appName;
-  final String? name;
-  final String runtime;
-  final Map<String, Object?> fields;
-  final List<LogTransport> transports;
-
-  /// Default routing for OTEL transports when a call makes no choice of its own.
-  final bool otel;
-  final String Function() _idFactory;
-  final String Function() _clock;
-
-  /// Derived logger that delivers every record to OTEL transports (the default).
-  Logger useOtel() => withOtel(true);
-
-  /// Derived logger that keeps records off OTEL transports; every other
-  /// transport still receives them.
-  Logger notOtel() => withOtel(false);
-
-  Logger withOtel(bool enabled) => enabled == otel
-      ? this
-      : Logger(
-          appName: appName,
-          name: name,
-          runtime: runtime,
-          fields: fields,
-          transports: transports,
-          otel: enabled,
-          idFactory: _idFactory,
-          clock: _clock,
-        );
-
-  /// [otel] overrides this call's routing: `true` forces delivery to OTEL
-  /// transports, `false` skips them, `null` follows the logger default.
-  Future<Map<String, Object?>> log(
-    LogLevel level,
-    String message, {
-    Map<String, Object?> eventFields = const <String, Object?>{},
-    List<Object?> values = const <Object?>[],
-    bool? otel,
-  }) async {
-    if (appName.trim().isEmpty) {
-      throw ArgumentError.value(appName, 'appName', 'must not be empty');
-    }
-    final context = currentLogContext;
-    final mergedFields = <String, Object?>{
-      ...fields,
-      ...?context?.fields,
-      if (context?.spanId != null) 'otel.span_id': context!.spanId,
-      if (context != null) 'otel.trace_flags': context.traceFlags,
-      if (context?.traceState != null) 'otel.trace_state': context!.traceState,
-      ...eventFields,
-    };
-    final traceId = context?.traceId;
-    final record = <String, Object?>{
-      'schema': nextLoggersSchema,
-      'id': _idFactory(),
-      'timestamp': _clock(),
-      'level': level.wire,
-      'runtime': runtime,
-      'appName': appName,
-      if (name != null && name!.isNotEmpty) 'name': name,
-      'message': message,
-      'values': values.isEmpty ? <Object?>[message] : List<Object?>.from(values),
-      'fields': mergedFields,
-      if (traceId != null && traceId.isNotEmpty) 'traceId': traceId,
-      if (traceId != null && traceId.isNotEmpty) 'traceIds': <String>[traceId],
-      if (context != null && context.tags.isNotEmpty) 'tags': List<String>.from(context.tags),
-    };
-    final immutable = _deepCopy(record);
-    final includeOtel = otel ?? this.otel;
-    for (final transport in transports) {
-      if (!includeOtel && transport is OtelBridgeTransport) {
-        continue;
-      }
-      await transport.write(immutable);
-    }
-    return immutable;
-  }
-
-  Future<Map<String, Object?>> info(
-    String message, {
-    Map<String, Object?> fields = const <String, Object?>{},
-    bool? otel,
-  }) =>
-      log(LogLevel.info, message, eventFields: fields, otel: otel);
-
-  Future<Map<String, Object?>> warn(
-    String message, {
-    Map<String, Object?> fields = const <String, Object?>{},
-    bool? otel,
-  }) =>
-      log(LogLevel.warn, message, eventFields: fields, otel: otel);
-
-  Future<Map<String, Object?>> error(
-    String message, {
-    Map<String, Object?> fields = const <String, Object?>{},
-    bool? otel,
-  }) =>
-      log(LogLevel.error, message, eventFields: fields, otel: otel);
-
-  static String _randomId() {
-    final random = Random.secure();
-    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
-    return base64Url.encode(bytes).replaceAll('=', '');
-=======
 class MemoryTransport
     implements
         LogTransport,
@@ -708,7 +611,6 @@ class MemoryTransport
   @override
   void close() {
     closed = true;
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   }
 }
 

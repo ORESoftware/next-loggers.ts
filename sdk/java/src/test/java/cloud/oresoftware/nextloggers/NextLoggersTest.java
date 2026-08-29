@@ -74,23 +74,6 @@ public final class NextLoggersTest {
     }
 
     List<Map<String, Object>> routedOtel = new ArrayList<>();
-<<<<<<< HEAD
-    List<Map<String, Object>> routedAll = new ArrayList<>();
-    NextLoggers.Logger routed =
-        new NextLoggers.Logger(
-            "checkout",
-            List.of(
-                new NextLoggers.OtelTransport(routedOtel::add),
-                new NextLoggers.SupabaseTransport(routedAll::add)));
-    routed.info("default on", Map.of());
-    routed.notOtel().warn("opted out", Map.of());
-    routed.notOtel().useOtel().error("opted back in", Map.of());
-    assert routedOtel.size() == 2 : "notOtel() must skip the OTEL transport";
-    assert "default on".equals(routedOtel.get(0).get("body"));
-    assert "opted back in".equals(routedOtel.get(1).get("body"));
-    assert routedAll.size() == 3 : "other transports must receive every record";
-    assert routed.otelEnabled() : "notOtel() must return a derived logger";
-=======
     List<Map<String, Object>> regular = new ArrayList<>();
     NextLoggers.Logger routedLogger =
         new NextLoggers.Logger(
@@ -119,7 +102,26 @@ public final class NextLoggersTest {
         .equals(List.of("forced-on", "logger-on"));
     assert regular.stream().map(value -> value.get("message")).toList()
         .equals(List.of("default-off", "forced-on", "reset-off", "forced-off", "logger-on"));
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
+
+    // Call-site scenario kept from main. useOtel()/notOtel() now update the
+    // logger default in place (matching the TypeScript SDK) instead of
+    // returning a derived logger, so the final assertion checks the default.
+    List<Map<String, Object>> callSiteOtel = new ArrayList<>();
+    List<Map<String, Object>> callSiteAll = new ArrayList<>();
+    NextLoggers.Logger routed =
+        new NextLoggers.Logger(
+            "checkout",
+            List.of(
+                new NextLoggers.OtelTransport(callSiteOtel::add),
+                new NextLoggers.SupabaseTransport(callSiteAll::add)));
+    routed.info("default on", Map.of());
+    routed.notOtel().warn("opted out", Map.of());
+    routed.notOtel().useOtel().error("opted back in", Map.of());
+    assert callSiteOtel.size() == 2 : "notOtel() must skip the OTEL transport";
+    assert "default on".equals(callSiteOtel.get(0).get("body"));
+    assert "opted back in".equals(callSiteOtel.get(1).get("body"));
+    assert callSiteAll.size() == 3 : "other transports must receive every record";
+    assert routed.otelEnabled() : "useOtel() must leave the logger default on";
 
     System.out.println("Java next-loggers conformance passed");
   }

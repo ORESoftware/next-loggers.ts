@@ -15,22 +15,6 @@ Maven coordinates:
 </dependency>
 ```
 
-<<<<<<< HEAD
-## OpenTelemetry on or off
-
-`OtelTransport` overrides `isOtel()` to `true`, so records can be routed around
-it without touching the OTEL SDK. `useOtel()` and `notOtel()` return a derived
-logger sharing the same transports:
-
-```java
-logger.notOtel().warn("noisy poll", Map.of());  // other transports still receive it
-logger.useOtel().error("paged", Map.of());
-```
-
-The `Logger(appName, name, runtime, fields, transports, otel)` constructor sets
-the default. Records are delivered as the call returns, so there is no
-unsent-event state to forget.
-=======
 ## Per-event OpenTelemetry routing
 
 The existing logger constructors default OTEL routing to `true`; the overload
@@ -48,4 +32,8 @@ log.event(NextLoggers.Level.INFO, "computed", Map.of()).withOtel(routeToOtel).se
 resolves it. `setOtelEnabled`, `useOtel`, and `notOtel` update the logger
 default. Only transports whose `isOtel()` marker/name identifies
 OpenTelemetry are filtered.
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
+
+`withOtel(boolean)` and `otelEnabled()` are kept as aliases of
+`setOtelEnabled`/`isOtelEnabled`, so callers written against either generation
+of the API compile unchanged. `useOtel()`/`notOtel()` update the logger default
+in place rather than returning a derived logger, matching the TypeScript SDK.

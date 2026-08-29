@@ -59,25 +59,6 @@ Future<void> main() async {
   assert(traces[1] == 'trace-b');
 
   final routedOtel = <Map<String, Object?>>[];
-<<<<<<< HEAD
-  final routedAll = <Map<String, Object?>>[];
-  final routed = Logger(
-    appName: 'checkout',
-    transports: <LogTransport>[
-      OpenTelemetryTransport(routedOtel.add),
-      SupabaseTransport(routedAll.add),
-    ],
-  );
-  await routed.info('default on');
-  await routed.warn('opted out', otel: false);
-  await routed.notOtel().error('logger opted out');
-  await routed.notOtel().info('call opted back in', otel: true);
-  assert(routedOtel.length == 2);
-  assert(routedOtel.first['body'] == 'default on');
-  assert(routedOtel.last['body'] == 'call opted back in');
-  assert(routedAll.length == 4);
-  assert(routed.otel, 'notOtel() must return a derived logger');
-=======
   final regular = MemoryTransport();
   final routedLogger = Logger(
     appName: 'routing',
@@ -104,7 +85,29 @@ Future<void> main() async {
     regular.records.map((record) => record['message']).toList().join(',') ==
         'default-off,forced-on,reset-off,forced-off,logger-on',
   );
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
+
+  // Call-site scenario kept from main: Dart carries the same decision as a
+  // named argument. useOtel()/notOtel() now update the logger default in place
+  // (matching the TypeScript SDK) instead of returning a derived logger.
+  final callSiteOtel = <Map<String, Object?>>[];
+  final callSiteAll = <Map<String, Object?>>[];
+  final callSite = Logger(
+    appName: 'checkout',
+    transports: <LogTransport>[
+      OpenTelemetryTransport(callSiteOtel.add),
+      SupabaseTransport(callSiteAll.add),
+    ],
+  );
+  await callSite.info('default on');
+  await callSite.warn('opted out', otel: false);
+  callSite.notOtel();
+  await callSite.error('logger opted out');
+  await callSite.info('call opted back in', otel: true);
+  assert(callSiteOtel.length == 2);
+  assert(callSiteOtel.first['body'] == 'default on');
+  assert(callSiteOtel.last['body'] == 'call opted back in');
+  assert(callSiteAll.length == 4);
+  assert(!callSite.isOtelEnabled(), 'notOtel() sets the logger default');
 
   print('Dart/Flutter next-loggers conformance passed');
 }

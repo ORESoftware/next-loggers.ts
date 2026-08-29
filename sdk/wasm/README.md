@@ -6,20 +6,6 @@ crate does not install global OpenTelemetry providers or patch a host runtime.
 
 The crate is suitable for `wasm32-unknown-unknown` and native conformance tests.
 
-<<<<<<< HEAD
-## OpenTelemetry on or off, per call
-
-`OpenTelemetryTransport` returns `true` from `Transport::is_otel`, so a record
-can skip it without touching the OTEL SDK:
-
-```rust
-logger.log_with(LogLevel::Warn, "noisy poll", None, fields, Some(false))?;
-```
-
-`Logger::use_otel()` / `not_otel()` set the default for calls that pass `None`.
-This core delivers inside `log`, so there is no deferred event to forget to
-send.
-=======
 ## Per-event OpenTelemetry routing
 
 OpenTelemetry is enabled by default. Configure an opt-in logger with
@@ -36,4 +22,9 @@ logger.event(LogLevel::Info, "computed", None, BTreeMap::new()).with_otel(route_
 resolves it. Mutable `set_otel_enabled` updates an existing logger; the builder
 `use_otel`/`not_otel` forms set the inherited default. Regular host transports
 still receive records excluded from OTEL.
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
+
+`log_with(.., Option<bool>)` is kept from the immediate API: `Some(true)` forces
+delivery to OTEL transports, `Some(false)` skips them, and `None` follows the
+logger default. It delivers at the call site, so it leaves no deferred event.
+`with_otel`/`otel_enabled` remain as aliases of
+`with_otel_enabled`/`is_otel_enabled`.

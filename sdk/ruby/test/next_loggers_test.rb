@@ -57,7 +57,10 @@ class NextLoggersTest < Minitest::Test
 
     assert_equal %w[trace-a trace-b], [traces.pop, traces.pop].sort
   end
-<<<<<<< HEAD
+
+  # Call-site scenario kept from main. use_otel/not_otel now update the logger
+  # default in place (matching the TypeScript SDK) rather than returning a
+  # derived logger, so the final assertion checks the default.
   def test_not_otel_routes_around_the_otel_transport
     otel = []
     supabase = []
@@ -75,10 +78,8 @@ class NextLoggersTest < Minitest::Test
 
     assert_equal ["default on", "opted back in"], otel.map { |record| record["body"] }
     assert_equal 3, supabase.length
-    assert_equal true, logger.otel, "not_otel must return a derived logger, not mutate this one"
+    assert_equal true, logger.otel_enabled?, "use_otel must leave the logger default on"
   end
-
-=======
 
   def test_per_event_otel_routing_preserves_regular_transports
     otel = []
@@ -107,5 +108,4 @@ class NextLoggersTest < Minitest::Test
       regular.map { |record| record.fetch("message") }
     )
   end
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
 end

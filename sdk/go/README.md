@@ -38,35 +38,6 @@ otel := nextloggers.NewOpenTelemetryTransport(func(record nextloggers.OpenTeleme
 supabase := nextloggers.NewSupabaseTransport(sendToSupabase)
 ```
 
-<<<<<<< HEAD
-## OpenTelemetry on or off, per event
-
-`OpenTelemetryTransport` reports `IsOtel() == true`, so a single record can opt
-in or out without touching the OTEL SDK:
-
-```go
-logger.Info("charged").UseOtel().Send()
-logger.Warn("noisy poll").NotOtel().Send()   // other transports still receive it
-logger.Error("failed").WithOtel(exportErrors).Send()
-```
-
-`Options.Otel` sets the default those events fall back to: leave it `nil` for
-"export everything" or point it at `false` to make OpenTelemetry opt-in.
-`logger.UseOtel()` / `logger.NotOtel()` flip it later. Any transport can join
-the routing by implementing `IsOtel() bool`.
-
-## Missing `Send()`
-
-`Event` is only delivered by `Send()`. Run the bundled checker in CI:
-
-```sh
-go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint ./...
-```
-
-It reports `file:line:col` for every statement that builds an event and drops
-it, and exits 1 when it finds one. Only files importing this SDK are inspected;
-`-logger name` adds application-specific logger variables.
-=======
 ## Per-event OpenTelemetry routing
 
 OpenTelemetry is enabled by default. Use `Options.Otel` when the default must
@@ -87,4 +58,15 @@ _ = log.Info("computed").WithOtel(routeToOtel).Send()
 `ResetOtel` restores the logger default and `IsOtelEnabled(fallback)` resolves
 it. `SetOtelEnabled`, `UseOtel`, and `NotOtel` update the logger default. OTEL
 routing never suppresses non-OTEL transports.
->>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
+
+## Missing `Send()`
+
+`Event` is only delivered by `Send()`. Run the bundled checker in CI:
+
+```sh
+go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint ./...
+```
+
+It reports `file:line:col` for every statement that builds an event and drops
+it, and exits 1 when it finds one. Only files importing this SDK are inspected;
+`-logger name` adds application-specific logger variables.
