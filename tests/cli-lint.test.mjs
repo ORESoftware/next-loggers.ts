@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { checkSource } from '../dist/cli/commands/lint.js';
+import { checkSource, lintSource } from '../dist/cli/commands/lint.js';
 import { main } from '../dist/cli/main.js';
 
 const lines = (findings) => findings.map((finding) => finding.line);
@@ -151,4 +151,35 @@ test('the lint command walks paths, prints findings, and exits 1', async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+const imported = `
+  import { createLogger } from '@oresoftware/next-loggers';
+  const log = createLogger({ appName: 'test' });
+`;
+
+test('NL100 flags a standalone event chain that never sends', () => {
+  const findings = lintSource(`${imported}\nlog.info('started').withTag('boot');\n`, 'sample.ts');
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].code, 'NL100');
+  assert.equal(findings[0].line, 5);
+});
+
+test('accepts send and sendWithStore terminal calls', () => {
+  assert.deepEqual(
+    lintSource(
+      `${imported}\nlog.info('sent').send();\nlog.warn('stored').sendWithStore();\n`,
+      'sample.ts',
+    ).map((finding) => finding.line),
+    [],
+  );
+});
+
+test('tracks imported aliases and factory-created loggers', () => {
+  const source = `
+    import { createLogger as makeLogger } from '@oresoftware/next-loggers/node';
+    const audit = makeLogger({ appName: 'audit' });
+    audit.error('missing');
+  `;
+  assert.equal(lintSource(source, 'sample.mts').length, 1);
 });

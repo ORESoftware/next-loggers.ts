@@ -23,6 +23,12 @@ export interface LintFinding {
   column: number;
   language: Language;
   message: string;
+  code?: 'NL100';
+}
+
+export interface LintSourceOptions {
+  all?: boolean;
+  loggerNames?: readonly string[];
 }
 
 export type Language = 'javascript' | 'typescript' | 'go' | 'rust' | 'python' | 'gleam';
@@ -58,9 +64,12 @@ const SKIP_DIRECTORIES = new Set([
   'node_modules',
   'dist',
   'build',
+  'coverage',
   'target',
   'vendor',
   '.git',
+  '.vendor',
+  '.zed',
   '_build',
   'deps',
 ]);
@@ -172,8 +181,36 @@ function previousLine(code: string, lineStart: number): string {
 
 function loggerNames(code: string, language: Language, extra: readonly string[]): Set<string> {
   const names = new Set<string>([...DEFAULT_LOGGER_NAMES, ...extra]);
+  const factories = new Set<string>([
+    'createLogger',
+    'createBrowserLogger',
+    'createEdgeLogger',
+    'createCloudflareWorkerLogger',
+    'createNodeLogger',
+    'createBunLogger',
+    'createDenoLogger',
+  ]);
+  if (language === 'javascript' || language === 'typescript') {
+    for (const match of code.matchAll(
+      /import\s*\{([^}]*)\}\s*from\s*['"][^'"]*next-loggers[^'"]*['"]/g,
+    )) {
+      for (const entry of (match[1] ?? '').split(',')) {
+        const parts = entry.trim().split(/\s+as\s+/);
+        const imported = parts[0]?.trim();
+        const local = (parts[1] ?? parts[0])?.trim();
+        if (imported && local && factories.has(imported)) {
+          factories.add(local);
+        }
+      }
+    }
+  }
+  const factoryPattern = [...factories].map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const patterns = [
     /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?[\w.]*(?:create\w*Logger|NewLogger|Logger::new|Logger)\s*\(/g,
+    new RegExp(
+      String.raw`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:${factoryPattern.join('|')})\s*\(`,
+      'g',
+    ),
     /([A-Za-z_][\w]*)\s*:?=\s*[\w.]*(?:NewLogger|Logger::new|Logger)\s*\(/g,
     /let\s+([A-Za-z_][\w]*)\s*=\s*[\w.]*(?:new|logging\.new)\s*\(/g,
   ];
@@ -254,9 +291,26 @@ export function checkSource(
       column: start - (before.lastIndexOf('\n') + 1) + 1,
       language,
       message: MESSAGE,
+      code: 'NL100',
     });
   }
   return findings;
+}
+
+/** JS/TS-focused wrapper used by missing-send unit tests (NL100). */
+export function lintSource(
+  source: string,
+  file = '<source>',
+  options: LintSourceOptions = {},
+): LintFinding[] {
+  const fromPath = languageForPath(file);
+  const language =
+    fromPath === 'javascript' || fromPath === 'typescript' ? fromPath : 'typescript';
+  return checkSource(source, language, {
+    file,
+    loggerNames: options.loggerNames,
+    requireImport: !options.all && (options.loggerNames?.length ?? 0) === 0,
+  });
 }
 
 export function languageForPath(path: string): Language | undefined {

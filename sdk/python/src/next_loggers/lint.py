@@ -28,7 +28,7 @@ CODE = "NL100"
 MESSAGE = "next-loggers event is never sent; call .send() so it reaches transports"
 
 LEVEL_METHODS = frozenset({"trace", "debug", "info", "log", "warn", "error", "fatal"})
-SEND_METHODS = frozenset({"send"})
+SEND_METHODS = frozenset({"send", "send_with_store"})
 DEFAULT_LOGGER_NAMES = frozenset({"log", "logger", "ddlog"})
 LOGGER_FACTORIES = frozenset({"Logger", "create_logger", "createLogger"})
 MODULE_NAMES = frozenset({"next_loggers", "oresoftware_next_loggers"})
@@ -38,8 +38,10 @@ __all__ = [
     "MESSAGE",
     "Finding",
     "Plugin",
+    "NextLoggersSendChecker",
     "check_path",
     "check_source",
+    "lint_source",
     "main",
 ]
 
@@ -50,9 +52,13 @@ class Finding:
     column: int
     message: str
     filename: str = "<unknown>"
+    code: str = CODE
 
     def __str__(self) -> str:
-        return f"{self.filename}:{self.line}:{self.column + 1}: {CODE} {self.message}"
+        return f"{self.filename}:{self.line}:{self.column + 1}: {self.code} {self.message}"
+
+    def render(self) -> str:
+        return str(self)
 
 
 def _attribute_chain(node: ast.AST) -> Tuple[Optional[str], List[str]]:
@@ -170,6 +176,15 @@ def check_source(
     ]
 
 
+def lint_source(
+    source: str,
+    filename: str = "<unknown>",
+    logger_names: Iterable[str] = (),
+) -> List[Finding]:
+    """Missing-send check that always inspects the file (explicit logger names or defaults)."""
+    return check_source(source, filename, logger_names, require_import=False)
+
+
 def check_path(path: Path, logger_names: Iterable[str] = ()) -> List[Finding]:
     return check_source(
         path.read_text(encoding="utf-8"), str(path), logger_names=logger_names
@@ -186,6 +201,23 @@ def _python_files(targets: Sequence[str]) -> Iterator[Path]:
                 yield child
         else:
             yield path
+
+
+class NextLoggersSendChecker:
+    """Flake8 extension exposing the NL1 missing-send diagnostic family."""
+
+    name = "next-loggers-require-send"
+    version = "0.1.0"
+
+    def __init__(self, tree: ast.AST, filename: str = "<unknown>") -> None:
+        self.tree = tree
+        self.filename = filename
+
+    def run(self) -> Iterator[Tuple[int, int, str, type]]:
+        collector = _Collector(set(DEFAULT_LOGGER_NAMES))
+        collector.visit(self.tree)
+        for finding in collector.findings:
+            yield finding.line, finding.column, f"{CODE} {MESSAGE}", type(self)
 
 
 class Plugin:

@@ -339,14 +339,14 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'lint',
     summary: 'Report next-loggers events that are built but never sent, in every supported language.',
-    positionals: ['paths'],
+    positionals: ['paths...'],
     flags: [
       {
         key: 'logger_name',
         env: 'NEXT_LOGGER_CLI_LINT_LOGGER_NAMES',
         aliases: ['logger-name'],
         type: 'array',
-        help: 'Extra variable name holding a logger; repeatable.',
+        help: 'Extra variable or property path holding a next-loggers logger; repeatable.',
       },
       {
         key: 'all',
@@ -354,7 +354,7 @@ export const COMMANDS: CommandSpec[] = [
         aliases: ['all'],
         type: 'bool',
         default: 'false',
-        help: 'Check every file, including those with no next-loggers import.',
+        help: 'Check every supported source file, including files without a next-loggers import.',
       },
     ],
   },

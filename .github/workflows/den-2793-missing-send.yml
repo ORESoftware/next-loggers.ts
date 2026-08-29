@@ -1,0 +1,114 @@
+name: DEN-2793 missing-send diagnostics
+
+on:
+  pull_request:
+    paths:
+      - .cli-flags.toml
+      - .github/workflows/den-2793-missing-send.yml
+      - .zpkg.toml
+      - .zpkg.lock
+      - docs/CLI.md
+      - package.json
+      - src/cli/**
+      - sdk/go/cmd/nextloggerslint/**
+      - sdk/python/**
+      - sdk/rust/src/core.rs
+      - tests/cli-lint.test.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-2793-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostics:
+    name: JS, Go, Python, Rust and Zed contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build, typecheck and test the dependency-free CLI
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          node dist/cli/main.js flags --check
+
+      - name: Verify the Zed package contract
+        run: |
+          test -s .zpkg.toml
+          test -s .zpkg.lock
+          ZED_PKG_TEST_TARGET="$PWD" sh ./.zpkg-smoke.sh
+
+      - name: Test the Go analyzer
+        working-directory: sdk/go
+        run: |
+          go version
+          go test ./...
+
+      - name: Test the Python analyzer and flake8 extension
+        working-directory: sdk/python
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 --version
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 -m next_loggers.lint tests/test_lint.py
+
+      - name: Test the Rust SDK
+        run: |
+          rustc --version
+          cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
+          cargo test --manifest-path sdk/rust/Cargo.toml
+
+      - name: Prove an ignored Rust Event is a compile error under -D unused-must-use
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe=$(mktemp -d)
+          cat > "$probe/Cargo.toml" <<EOF_CARGO
+          [package]
+          name = "next-loggers-must-use-probe"
+          version = "0.0.0"
+          edition = "2021"
+
+          [dependencies]
+          next-loggers = { package = "oresoftware-next-loggers", path = "$GITHUB_WORKSPACE/sdk/rust" }
+          EOF_CARGO
+          mkdir -p "$probe/src"
+          cat > "$probe/src/main.rs" <<'EOF_UNSENT'
+          use next_loggers::{json, Logger, Options};
+
+          fn main() {
+              let logger = Logger::new(Options::default());
+              logger.info(vec![json!("unsent")]);
+          }
+          EOF_UNSENT
+          if RUSTFLAGS='-D unused-must-use' cargo check --manifest-path "$probe/Cargo.toml" 2>"$probe/unsent.log"; then
+            echo "ignored Event unexpectedly compiled" >&2
+            exit 1
+          fi
+          grep -F 'a next-loggers event is only delivered when .send() is called' "$probe/unsent.log"
+
+          cat > "$probe/src/main.rs" <<'EOF_SENT'
+          use next_loggers::{json, Logger, Options};
+
+          fn main() {
+              let logger = Logger::new(Options::default());
+              logger.info(vec![json!("sent")]).send().expect("send succeeds");
+          }
+          EOF_SENT
+          RUSTFLAGS='-D unused-must-use' cargo check --manifest-path "$probe/Cargo.toml"
