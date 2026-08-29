@@ -11,6 +11,9 @@
   "files": [
     "dist",
     "src",
+    "sdk",
+    "contracts",
+    "docs",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -89,6 +92,14 @@
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
+    "./shutdown": {
+      "types": "./dist/shutdown.d.ts",
+      "default": "./dist/shutdown.js"
+    },
+    "./shutdown/node": {
+      "types": "./dist/node-shutdown.d.ts",
+      "default": "./dist/node-shutdown.js"
+    },
     "./browser-stream": {
       "types": "./dist/browser-stream.d.ts",
       "default": "./dist/browser-stream.js"
@@ -96,6 +107,26 @@
     "./otel": {
       "types": "./dist/otel.d.ts",
       "default": "./dist/otel.js"
+    },
+    "./prometheus": {
+      "types": "./dist/prometheus.d.ts",
+      "default": "./dist/prometheus.js"
+    },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
+    },
+    "./supabase-ingest": {
+      "types": "./dist/supabase-ingest.d.ts",
+      "default": "./dist/supabase-ingest.js"
     },
     "./config": {
       "types": "./dist/config.d.ts",
@@ -105,16 +136,37 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./server-lifecycle": {
+      "types": "./dist/server-lifecycle.d.ts",
+      "import": "./dist/server-lifecycle.js",
+      "default": "./dist/server-lifecycle.js"
+    },
+    "./execution-context": {
+      "browser": {
+        "types": "./dist/execution-context-browser.d.ts",
+        "default": "./dist/execution-context-browser.js"
+      },
+      "workerd": {
+        "types": "./dist/execution-context-workerd.d.ts",
+        "default": "./dist/execution-context-workerd.js"
+      },
+      "types": "./dist/execution-context.d.ts",
+      "default": "./dist/execution-context.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && npm run postbuild",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:contracts": "node scripts/test-observability-contracts.mjs",
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
-    "test:all": "npm test && npm run test:runtimes && npm run test:polyglot",
+    "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
+    "audit:shutdown": "node scripts/audit-server-shutdown.mjs",
+    "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
+    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json --prefix sdk/nodejs",
     "prepack": "npm test"
   },
   "engines": {
@@ -126,11 +178,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ORESoftware/next-loggers.ts.git"
+    "url": "git+https://github.com/ores-otel/ores.otel.log.git"
   },
-  "homepage": "https://github.com/ORESoftware/next-loggers.ts#readme",
+  "homepage": "https://github.com/ores-otel/ores.otel.log#readme",
   "bugs": {
-    "url": "https://github.com/ORESoftware/next-loggers.ts/issues"
+    "url": "https://github.com/ores-otel/ores.otel.log/issues"
   },
   "devDependencies": {
     "eslint": "^10.7.0",
@@ -154,6 +206,14 @@
     "nextjs",
     "esm",
     "supabase",
+    "wasm",
+    "rust",
+    "go",
+    "gleam",
+    "java",
+    "erlang",
+    "elixir",
+    "dart",
     "bun",
     "deno",
     "edge",

@@ -1,3 +1,6 @@
+<!-- ores-otel-canonical -->
+> **Canonical repository:** [`ores-otel/ores.otel.log`](https://github.com/ores-otel/ores.otel.log). `ORESoftware/next-loggers.ts` remains the legacy compatibility remote.
+
 # @oresoftware/next-loggers
 
 Dependency-free, ESM-only loggers for Next.js, browsers, edge workers, Cloudflare Workers, Node.js, Bun, and Deno. Log events are chainable, safely serialized, and can be sent to HTTP endpoints or streamed over Supabase Realtime WebSockets.
@@ -21,6 +24,12 @@ the same logging pipeline:
 | Go | [`sdk/go`](sdk/go) |
 | Rust | [`sdk/rust`](sdk/rust) |
 | Gleam | [`sdk/gleam`](sdk/gleam) |
+| Java | [`sdk/java`](sdk/java) |
+| Dart / Flutter | [`sdk/dart`](sdk/dart) |
+| Ruby | [`sdk/ruby`](sdk/ruby) |
+| Erlang | [`sdk/erlang`](sdk/erlang) |
+| Elixir | [`sdk/elixir`](sdk/elixir) |
+| Rust / WebAssembly | [`sdk/wasm`](sdk/wasm) |
 
 All implementations emit the strict `next-loggers/v1` wire record in
 [`contracts/log-record.schema.json`](contracts/log-record.schema.json). They
@@ -29,6 +38,12 @@ lifecycle hooks, minimum-level filtering, and recovery of unsent events during
 `flush_on_exit`/`close`. Public logger, event, record, options, level, and
 transport types are exported so applications can subclass, embed, wrap, or
 compose them according to the language.
+
+Every SDK also exposes dependency-free, application-owned OpenTelemetry and
+Supabase transports. The application injects its OTEL emitter or authenticated
+Supabase sender; the logger never registers a global telemetry provider or
+patches a runtime. The common OTEL bridge shape is documented in
+[`docs/otel.md`](docs/otel.md).
 
 Run every native conformance suite with:
 
@@ -100,6 +115,33 @@ await log.flush({ timeoutMillis: 2_000 });
 
 Circular references, errors, dates, bigints, maps, sets, functions, and symbols are normalized before transport.
 
+## OpenTelemetry on or off, per call
+
+An OTEL transport is a transport like any other, so a single record can opt in or out of it without touching the OpenTelemetry SDK:
+
+```ts
+log.info('charged').useOtel().send();     // force delivery to OTEL transports
+log.warn('noisy poll').notOtel().send();  // every other transport still gets it
+log.error('failed').withOtel(exportErrors).send(); // computed at runtime
+```
+
+The logger decides the default those events fall back to. `otel: true` (the default) exports everything and lets `notOtel()` opt out; `otel: false` makes OpenTelemetry opt-in:
+
+```ts
+import { withOpenTelemetry } from '@oresoftware/next-loggers/otel';
+
+const log = createNodeLogger(withOpenTelemetry(
+  { appName: 'checkout-api' },
+  { logger: otelLogger, activeSpan, otel: false },
+));
+
+log.info('routine').send();               // skips OTEL
+log.error('paged').useOtel().send();      // exported
+log.useOtel();                            // flip the default; anew() children inherit it
+```
+
+Skipping OTEL skips the whole bridge for that record — no log emit, span event, exception, status, or metric — while every other transport still receives it. The wire record is unchanged; this is delivery routing, not a schema field. Every native SDK has the same control; see [docs/otel.md](docs/otel.md#choosing-opentelemetry-per-call).
+
 ## ESLint: require `.send()`
 
 The ESM-only ESLint plugin supports ESLint 9 and 10 flat config. Its recommended rule warns when a standalone logger chain forgets `.send()`:
@@ -132,6 +174,29 @@ export default [
 ```
 
 The rule intentionally expects an explicit `.send()`. If a specific logger relies on `autoSend: true`, disable or scope the rule for that code.
+
+## Missing `.send()` in every runtime
+
+A level call builds an event; only `send()` delivers it. Each runtime has a diagnostic for the mistake, native where the language offers one:
+
+| Runtime | Tool | How it reports |
+| --- | --- | --- |
+| JavaScript / TypeScript | `next-loggers/require-send` ESLint rule | lint warning |
+| Rust, WASM | `#[must_use]` on `Event` | `rustc` warning: ``unused `Event` that must be used`` |
+| Go | `go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint ./...` | `file:line:col` findings, exit 1 |
+| Python | `next-loggers-lint path/` or the bundled flake8 plugin (`NL100`) | flake8 diagnostics or CLI findings |
+| Gleam | `next-loggers lint src/` (the compiler has no must-use attribute) | `file:line:col` findings, exit 1 |
+| Any of the above, in one pass | `next-loggers lint .` | `file:line:col` findings, exit 1 |
+
+```console
+$ next-loggers lint sdk src
+src/handlers/checkout.ts:42:3: next-loggers event is never sent; call send() so it reaches transports
+lint: 1 unsent event(s) in 113 checked file(s)
+```
+
+`next-loggers lint` understands JavaScript, TypeScript, Go, Rust, Python, and Gleam, including multi-line chains and Gleam `|>` pipelines. It only inspects files that reference next-loggers (pass `--all` to override, `--logger-name audit` to add names), and reports a bare expression statement only — an event that is returned, assigned, or passed along may be sent elsewhere.
+
+Java, Ruby, Dart, Erlang, and Elixir have nothing to report: their loggers deliver at the call site instead of returning a deferred event. In Dart the call returns a `Future`, so enable the analyzer's `unawaited_futures` lint to catch a delivery that is never awaited.
 
 ## Supabase Realtime WebSocket streaming
 
@@ -203,6 +268,34 @@ const transport: LogTransport = {
   },
 };
 ```
+
+### Route OpenTelemetry per event
+
+OpenTelemetry transports receive records by default. Set `otel: false` on a
+logger to make them opt-in, then override one event without changing delivery
+to HTTP, Supabase, memory, or any other transport:
+
+```ts
+const log = createLogger({
+  otel: false,
+  transports: [otelTransport, supabaseTransport],
+});
+
+await log.info('sampled in').useOtel().send();
+await log.warn('OTEL excluded').notOtel().send();
+await log.info('computed').withOtel(routeToOtel).send();
+await log.info('back to default').useOtel().resetOtel().send();
+```
+
+`event.isOtelEnabled(fallback)` resolves the per-event value. Logger
+`setOtelEnabled()`, `useOtel()`, and `notOtel()` update the default in the
+options object, so `anew()` children inherit it. An OTEL transport is identified
+by `otel: true` or the name `opentelemetry`; the built-in bridge sets both.
+
+`withOpenTelemetry(options, bridge)` appends the built-in bridge while
+preserving existing transports. If the bridge supplies `activeSpan`, it also
+installs span correlation unless the options already contain an explicit
+`contextProvider`.
 
 ## Error tracking
 
@@ -329,6 +422,7 @@ The package ships a `next-loggers` executable.
 npx next-loggers doctor          # will logging behave correctly here?
 npx next-loggers resolve --runtime workerd
 npx next-loggers smoke --depth full
+npx next-loggers lint .          # events built but never sent, in six languages
 your-app | npx next-loggers pretty
 ```
 
@@ -338,6 +432,7 @@ your-app | npx next-loggers pretty
 | `resolve` | Walks the package's own `exports` map for a condition set and prints what each subpath resolves to — for *any* runtime, from any host. |
 | `smoke` | Imports an installed build and verifies it. This is the `zed r2g` entry point and the only automatic guard against publishing a stale `dist/`. |
 | `pretty` | Renders `next-loggers/v1` NDJSON from stdin. Non-JSON lines pass through untouched, so it is safe at the end of any pipeline. |
+| `lint` | Reports events that never call `send()` in JavaScript, TypeScript, Go, Rust, Python, and Gleam; exit 1 on findings. |
 | `flags` | Prints the flag/env contract; `--check` fails on drift. |
 
 `doctor` exists for one reason above the others: when the single-frame context
@@ -536,6 +631,18 @@ const log = createNodeLogger({ appName: 'web', after });
 
 Every transport promise is also tracked in the exported `pendingLogPromises` registry, analogous to a focused `dd-proms.ts`. `waitForPendingLogs()` drains writes across logger instances.
 
+## Detect events that never send
+
+An event is delivered only after its terminal send call. The repository ships the same missing-send diagnostic in every primary development path:
+
+```sh
+next-loggers lint src test
+go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint@latest ./...
+next-loggers-lint .
+```
+
+The JavaScript/TypeScript CLI uses the flags-2-env variables `NEXT_LOGGER_CLI_LINT_LOGGER_NAMES` and `NEXT_LOGGER_CLI_LINT_ALL`; the existing `next-loggers/require-send` ESLint rule remains the editor path. Python also exposes a flake8 `NL1` extension, and Rust marks `Event` as `#[must_use]`, so an ignored event is visible to the compiler.
+
 ## Shutdown delivery
 
 Runtime loggers install coordinated lifecycle drains by default:
@@ -594,6 +701,7 @@ await new AuditLogger().info('changed role').withActor('user-1').send();
 - Set `autoSend: true` to enqueue `.send()` in a microtask.
 - Console output is enabled by default; set `console: false` to disable it.
 - `.send(false)` writes to the console but skips remote transports.
+- `.notOtel()` skips only OTEL transports; all other transports still receive the record.
 - `.flush()` waits for pending transport writes; pass `sendUnsent: true` to recover unfinished chains.
 - `.flushOnExit()` sends unfinished chains and runs transport shutdown hooks.
 - `.close()` performs the shutdown flush and then closes transports.

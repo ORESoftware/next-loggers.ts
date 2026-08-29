@@ -1,5 +1,4 @@
 apiVersion: 1
-
 prune: true
 
 datasources:
@@ -12,10 +11,10 @@ datasources:
     editable: false
     jsonData:
       httpMethod: POST
-      prometheusType: Prometheus
-      timeInterval: 15s
       exemplarTraceIdDestinations:
         - name: trace_id
+          datasourceUid: tempo
+        - name: traceID
           datasourceUid: tempo
 
   - name: Loki
@@ -25,12 +24,11 @@ datasources:
     url: http://loki:3100
     editable: false
     jsonData:
-      timeout: 60
-      maxLines: 5000
+      maxLines: 1000
       derivedFields:
         - name: TraceID
           matcherType: label
-          matcherRegex: trace_id
+          matcherRegex: trace[_]?id
           datasourceUid: tempo
           url: '$${__value.raw}'
           urlDisplayLabel: View trace
@@ -42,19 +40,22 @@ datasources:
     url: http://tempo:3200
     editable: false
     jsonData:
-      nodeGraph:
-        enabled: true
+      httpMethod: GET
       serviceMap:
         datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
       search:
         hide: false
+      streamingEnabled:
+        search: true
+        metrics: true
       tracesToLogsV2:
         datasourceUid: loki
-        spanStartTimeShift: -5m
-        spanEndTimeShift: 5m
+        spanStartTimeShift: -2s
+        spanEndTimeShift: 2s
         filterByTraceID: true
         filterBySpanID: true
-        customQuery: false
         tags:
           - key: service.name
             value: service_name
@@ -64,10 +65,17 @@ datasources:
             value: deployment_environment_name
       tracesToMetrics:
         datasourceUid: prometheus
-        spanStartTimeShift: -5m
-        spanEndTimeShift: 5m
+        spanStartTimeShift: -2m
+        spanEndTimeShift: 2m
         tags:
           - key: service.name
             value: service
-          - key: service.namespace
-            value: service_namespace
+          - key: deployment.environment.name
+            value: deployment_environment_name
+        queries:
+          - name: Span rate
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags}[5m]))'
+          - name: Error rate
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags,status_code="STATUS_CODE_ERROR"}[5m]))'
+          - name: P95 duration
+            query: 'histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[5m])) by (le))'

@@ -1,9 +1,9 @@
+stream_over_http_enabled: true
+
 server:
-  http_listen_address: 0.0.0.0
   http_listen_port: 3200
+  grpc_listen_port: 9095
   log_level: info
-  grpc_server_max_recv_msg_size: 8388608
-  grpc_server_max_send_msg_size: 8388608
 
 distributor:
   receivers:
@@ -23,6 +23,7 @@ compactor:
 
 metrics_generator:
   registry:
+    collection_interval: 5s
     external_labels:
       source: tempo
       cluster: next-loggers-local
@@ -31,6 +32,20 @@ metrics_generator:
     remote_write:
       - url: http://prometheus:9090/api/v1/write
         send_exemplars: true
+  processor:
+    service_graphs:
+      wait: 10s
+      max_items: 10000
+    span_metrics:
+      intrinsic_dimensions:
+        service: true
+        span_name: true
+        span_kind: false
+        status_code: true
+        status_message: false
+      enable_target_info: false
+      dimensions:
+        - deployment.environment.name
 
 storage:
   trace:
@@ -39,16 +54,17 @@ storage:
       path: /var/tempo/wal
     local:
       path: /var/tempo/blocks
-    pool:
-      max_workers: 50
-      queue_depth: 5000
 
-overrides:
-  defaults:
-    ingestion:
-      max_bytes_per_trace: 5000000
-    metrics_generator:
-      processors: [span-metrics, service-graphs]
+query_frontend:
+  search:
+    duration_slo: 5s
+    throughput_bytes_slo: 1073741824
 
 usage_report:
   reporting_enabled: false
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [span-metrics, service-graphs]
+      max_active_series: 100000

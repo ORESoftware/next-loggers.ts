@@ -108,3 +108,69 @@ fn transport_errors_are_visible_to_the_host() {
     let logger = Logger::new("app").unwrap().with_transport(Arc::new(Broken));
     assert_eq!(logger.error("boom", None).unwrap_err(), "offline");
 }
+
+#[test]
+fn per_event_opentelemetry_routing_preserves_regular_transports() {
+    let otel = Arc::new(Mutex::new(Vec::new()));
+    let regular = Arc::new(Mutex::new(Vec::new()));
+    let otel_sink = otel.clone();
+    let regular_sink = regular.clone();
+    let mut logger = Logger::new("app")
+        .unwrap()
+        .with_otel_enabled(false)
+        .with_transport(Arc::new(OpenTelemetryTransport::new(move |record| {
+            otel_sink.lock().unwrap().push(record);
+            Ok(())
+        })))
+        .with_transport(Arc::new(SupabaseTransport::new(move |record| {
+            regular_sink.lock().unwrap().push(record);
+            Ok(())
+        })));
+
+    let default_off = logger.event(LogLevel::Info, "default-off", None, BTreeMap::new());
+    assert!(!default_off.is_otel_enabled(logger.is_otel_enabled()));
+    default_off.send().unwrap();
+    logger
+        .event(LogLevel::Info, "forced-on", None, BTreeMap::new())
+        .use_otel()
+        .send()
+        .unwrap();
+    logger
+        .event(LogLevel::Info, "reset-off", None, BTreeMap::new())
+        .use_otel()
+        .reset_otel()
+        .send()
+        .unwrap();
+    logger.set_otel_enabled(true);
+    logger
+        .event(LogLevel::Warn, "forced-off", None, BTreeMap::new())
+        .not_otel()
+        .send()
+        .unwrap();
+    logger
+        .event(LogLevel::Info, "logger-on", None, BTreeMap::new())
+        .with_otel(true)
+        .send()
+        .unwrap();
+
+    let otel = otel.lock().unwrap();
+    assert_eq!(otel.len(), 2);
+    assert_eq!(otel[0].body, "forced-on");
+    assert_eq!(otel[1].body, "logger-on");
+    drop(otel);
+    assert_eq!(
+        regular
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|record| record.message.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "default-off",
+            "forced-on",
+            "reset-off",
+            "forced-off",
+            "logger-on"
+        ]
+    );
+}

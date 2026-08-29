@@ -36,6 +36,27 @@ var levelIndex = map[Level]int{
 	Fatal: 5,
 }
 
+// OTELSeverityNumber maps next-loggers levels onto OpenTelemetry severity
+// numbers without importing or registering a global OpenTelemetry SDK.
+func (level Level) OTELSeverityNumber() int {
+	switch level {
+	case Trace:
+		return 1
+	case Debug:
+		return 5
+	case Info:
+		return 9
+	case Warn:
+		return 13
+	case Error:
+		return 17
+	case Fatal:
+		return 21
+	default:
+		return 0
+	}
+}
+
 type LogRecord struct {
 	Schema       string           `json:"schema"`
 	ID           string           `json:"id"`
@@ -65,6 +86,14 @@ func (record LogRecord) JSON() ([]byte, error) {
 
 type Transport interface {
 	Write(LogRecord) error
+}
+
+type OpenTelemetryMarker interface {
+	IsOpenTelemetry() bool
+}
+
+type NamedTransport interface {
+	TransportName() string
 }
 
 type Flusher interface {
@@ -118,6 +147,75 @@ func (transport *MemoryTransport) Close() error {
 	return nil
 }
 
+// OpenTelemetryLogRecord is the dependency-free boundary passed to an
+// application-owned OpenTelemetry logger.
+type OpenTelemetryLogRecord struct {
+	Body           string         `json:"body"`
+	SeverityText   string         `json:"severityText"`
+	SeverityNumber int            `json:"severityNumber"`
+	Timestamp      string         `json:"timestamp"`
+	Attributes     map[string]any `json:"attributes"`
+}
+
+type OpenTelemetryEmitter func(OpenTelemetryLogRecord) error
+
+// OpenTelemetryTransport adapts next-loggers records to an injected OTEL
+// emitter. It never installs global providers or automatic instrumentation.
+type OpenTelemetryTransport struct {
+	Emit OpenTelemetryEmitter
+}
+
+func NewOpenTelemetryTransport(emit OpenTelemetryEmitter) *OpenTelemetryTransport {
+	return &OpenTelemetryTransport{Emit: emit}
+}
+
+func (transport *OpenTelemetryTransport) IsOpenTelemetry() bool { return true }
+func (transport *OpenTelemetryTransport) TransportName() string { return "opentelemetry" }
+
+func (transport *OpenTelemetryTransport) Write(record LogRecord) error {
+	if transport == nil || transport.Emit == nil {
+		return errors.New("nextloggers: OpenTelemetry emitter is required")
+	}
+	attributes := map[string]any{
+		"service.name":        record.AppName,
+		"next_logger.schema":  record.Schema,
+		"next_logger.runtime": record.Runtime,
+		"log.record.uid":      record.ID,
+	}
+	if record.TraceID != "" {
+		attributes["trace.id"] = record.TraceID
+	}
+	for key, value := range record.Fields {
+		attributes["next_logger.field."+key] = value
+	}
+	return transport.Emit(OpenTelemetryLogRecord{
+		Body:           record.Message,
+		SeverityText:   string(record.Level),
+		SeverityNumber: record.Level.OTELSeverityNumber(),
+		Timestamp:      record.Timestamp,
+		Attributes:     attributes,
+	})
+}
+
+type SupabaseSender func(LogRecord) error
+
+// SupabaseTransport delegates delivery to an application-owned authenticated
+// Supabase sender, which may use Realtime, HTTP ingestion, or another client.
+type SupabaseTransport struct {
+	Send SupabaseSender
+}
+
+func NewSupabaseTransport(send SupabaseSender) *SupabaseTransport {
+	return &SupabaseTransport{Send: send}
+}
+
+func (transport *SupabaseTransport) Write(record LogRecord) error {
+	if transport == nil || transport.Send == nil {
+		return errors.New("nextloggers: Supabase sender is required")
+	}
+	return transport.Send(record)
+}
+
 type Options struct {
 	AppName      string
 	Name         string
@@ -126,6 +224,7 @@ type Options struct {
 	Fields       map[string]any
 	LoggedInUser map[string]any
 	Transports   []Transport
+	Otel         *bool
 	Console      bool
 	Output       io.Writer
 	IDFactory    func() string
@@ -140,6 +239,7 @@ type Logger struct {
 	Fields        map[string]any
 	CurrentUser   map[string]any
 	Transports    []Transport
+	OtelEnabled   bool
 	Console       bool
 	Output        io.Writer
 	IDFactory     func() string
@@ -172,6 +272,10 @@ func NewLogger(options Options) *Logger {
 			return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		}
 	}
+	otelEnabled := true
+	if options.Otel != nil {
+		otelEnabled = *options.Otel
+	}
 	return &Logger{
 		AppName:       options.AppName,
 		Name:          options.Name,
@@ -180,6 +284,7 @@ func NewLogger(options Options) *Logger {
 		Fields:        cloneMap(options.Fields),
 		CurrentUser:   cloneMap(options.LoggedInUser),
 		Transports:    append([]Transport(nil), options.Transports...),
+		OtelEnabled:   otelEnabled,
 		Console:       options.Console,
 		Output:        options.Output,
 		IDFactory:     options.IDFactory,
@@ -262,6 +367,7 @@ type Event struct {
 	Context      []any
 	Meta         []any
 	StackTrace   []string
+	OtelEnabled  *bool
 
 	mu     sync.Mutex
 	sent   bool
@@ -311,11 +417,64 @@ func (logger *Logger) SetCurrentUser(user map[string]any) *Logger {
 	return logger
 }
 
+func (logger *Logger) SetOtelEnabled(enabled bool) *Logger {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	logger.OtelEnabled = enabled
+	return logger
+}
+
+func (logger *Logger) UseOtel() *Logger { return logger.SetOtelEnabled(true) }
+func (logger *Logger) NotOtel() *Logger { return logger.SetOtelEnabled(false) }
+
+func (logger *Logger) IsOtelEnabled() bool {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	return logger.OtelEnabled
+}
+
 func (event *Event) AddFields(fields map[string]any) *Event {
 	for key, value := range fields {
 		event.Fields[key] = value
 	}
 	return event
+}
+
+func (event *Event) WithOtel(enabled bool) *Event {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	event.OtelEnabled = new(bool)
+	*event.OtelEnabled = enabled
+	return event
+}
+
+func (event *Event) UseOtel() *Event { return event.WithOtel(true) }
+func (event *Event) NotOtel() *Event { return event.WithOtel(false) }
+
+func (event *Event) ResetOtel() *Event {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	event.OtelEnabled = nil
+	return event
+}
+
+func (event *Event) IsOtelEnabled(fallback bool) bool {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	if event.OtelEnabled == nil {
+		return fallback
+	}
+	return *event.OtelEnabled
+}
+
+func isOpenTelemetryTransport(transport Transport) bool {
+	if marked, ok := transport.(OpenTelemetryMarker); ok && marked.IsOpenTelemetry() {
+		return true
+	}
+	if named, ok := transport.(NamedTransport); ok {
+		return strings.EqualFold(named.TransportName(), "opentelemetry")
+	}
+	return false
 }
 
 func appendUnique(values []string, value string) []string {
@@ -483,6 +642,9 @@ func (logger *Logger) emit(event *Event, store bool) error {
 	}
 	var failures []error
 	for _, transport := range logger.Transports {
+		if isOpenTelemetryTransport(transport) && !event.IsOtelEnabled(logger.IsOtelEnabled()) {
+			continue
+		}
 		if err := transport.Write(record); err != nil {
 			failures = append(failures, err)
 		}

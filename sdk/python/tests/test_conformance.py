@@ -2,7 +2,14 @@ import json
 import unittest
 from pathlib import Path
 
-from next_loggers import LogEvent, LogLevel, Logger, MemoryTransport
+from next_loggers import (
+    LogEvent,
+    LogLevel,
+    Logger,
+    MemoryTransport,
+    OpenTelemetryTransport,
+    SupabaseTransport,
+)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -81,6 +88,91 @@ class LoggerContractTests(unittest.TestCase):
         self.assertEqual(len(transport.records), 1)
         self.assertEqual(transport.records[0].level, LogLevel.FATAL)
         self.assertEqual(transport.records[0].fields["actor"], "user-9")
+
+    def test_explicit_otel_and_supabase_transports(self):
+        otel = []
+        supabase = []
+        logger = Logger(
+            app_name="checkout",
+            runtime="python",
+            transports=[
+                OpenTelemetryTransport(otel.append),
+                SupabaseTransport(supabase.append),
+            ],
+            console=False,
+            id_factory=lambda: "otel-record-1",
+            clock=lambda: "2026-01-02T03:04:05.000Z",
+        )
+
+        logger.error("payment failed").add_trace(
+            "0123456789abcdef0123456789abcdef"
+        ).add_fields({"otel.span_id": "0123456789abcdef", "region": "us-east-1"}).send()
+
+        self.assertEqual(len(otel), 1)
+        self.assertEqual(otel[0]["severityText"], "ERROR")
+        self.assertEqual(otel[0]["severityNumber"], 17)
+        self.assertEqual(
+            otel[0]["attributes"]["trace.id"],
+            "0123456789abcdef0123456789abcdef",
+        )
+        self.assertEqual(otel[0]["attributes"]["service.name"], "checkout")
+        self.assertEqual(len(supabase), 1)
+        self.assertEqual(supabase[0]["schema"], "next-loggers/v1")
+        self.assertEqual(supabase[0]["message"], "payment failed")
+
+    def test_per_event_otel_routing_preserves_regular_transports(self):
+        otel = []
+        regular = MemoryTransport()
+        logger = Logger(
+            otel=False,
+            transports=[OpenTelemetryTransport(otel.append), regular],
+            console=False,
+        )
+
+        default_off = logger.info("default-off")
+        self.assertFalse(default_off.is_otel_enabled(logger.is_otel_enabled()))
+        default_off.send()
+        logger.info("forced-on").use_otel().send()
+        logger.info("reset-off").use_otel().reset_otel().send()
+        logger.use_otel()
+        logger.warn("forced-off").not_otel().send()
+        logger.info("logger-on").with_otel(True).send()
+
+        self.assertEqual([record["body"] for record in otel], ["forced-on", "logger-on"])
+        self.assertEqual(
+            [record.message for record in regular.records],
+            ["default-off", "forced-on", "reset-off", "forced-off", "logger-on"],
+        )
+
+
+    def test_per_event_otel_routing(self):
+        emitted = []
+        memory = MemoryTransport()
+        logger = Logger(
+            app_name="checkout",
+            console=False,
+            transports=[OpenTelemetryTransport(emitted.append), memory],
+        )
+        logger.info("default on").send()
+        logger.warn("opted out").not_otel().send()
+        logger.error("opted in").use_otel().send()
+        self.assertEqual([entry["body"] for entry in emitted], ["default on", "opted in"])
+        self.assertEqual(len(memory.records), 3)
+
+        opt_in = Logger(
+            app_name="checkout",
+            console=False,
+            otel=False,
+            transports=[OpenTelemetryTransport(emitted.append)],
+        )
+        opt_in.info("skipped").send()
+        self.assertEqual(len(emitted), 2)
+        opt_in.info("selected").use_otel().send()
+        self.assertEqual(emitted[-1]["body"], "selected")
+        opt_in.info("still skipped").use_otel().reset_otel().send()
+        self.assertEqual(len(emitted), 3)
+        opt_in.use_otel().info("default flipped").send()
+        self.assertEqual(emitted[-1]["body"], "default flipped")
 
 
 if __name__ == "__main__":

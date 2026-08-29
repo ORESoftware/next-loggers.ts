@@ -1,48 +1,67 @@
 groups:
-  - name: next-loggers-observability
+  - name: next-loggers-telemetry
     interval: 30s
     rules:
-      - alert: ObservabilityTargetDown
-        expr: up{job=~"prometheus|otel-collector-internal|otel-collector-exported-metrics|loki|tempo"} == 0
+      - alert: NextLoggersTelemetryBackendDown
+        expr: up{job=~"otel-collector-internal|otel-collector-exported|loki|tempo|prometheus"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "Observability target {{ $labels.job }} is down"
-          description: "Prometheus has been unable to scrape {{ $labels.instance }} for two minutes."
+          summary: "Telemetry backend is unavailable"
+          description: "{{ $labels.job }} / {{ $labels.instance }} has been down for more than two minutes."
 
-      - alert: PrometheusConfigReloadFailed
-        expr: prometheus_config_last_reload_successful == 0
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Prometheus configuration reload failed
-          description: Prometheus is running with its last valid configuration.
-
-      - alert: NextLoggersTransportFailureRate
-        expr: sum by (transport) (rate(next_loggers_transport_writes_total{outcome="failure"}[5m])) > 0
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Logger transport {{ $labels.transport }} is failing"
-          description: The transport has continuously reported failed writes for five minutes.
-
-      - alert: NextLoggersDropsDetected
-        expr: sum by (transport, reason) (increase(next_loggers_transport_dropped_total[10m])) > 0
-        for: 1m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Logger transport {{ $labels.transport }} dropped records"
-          description: "Records were dropped for reason {{ $labels.reason }} during the last ten minutes."
-
-      - alert: NextLoggersPendingWritesHigh
-        expr: max(next_loggers_pending_writes) > 1000
+      - alert: NextLoggersTransportFailureRatioHigh
+        expr: |
+          sum(rate(next_loggers_transport_writes_total{outcome="failure"}[5m]))
+          /
+          clamp_min(sum(rate(next_loggers_transport_writes_total[5m])), 1)
+          > 0.05
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: Logger pending-write backlog is high
-          description: More than 1,000 writes have remained pending for ten minutes.
+          summary: "More than 5% of logger transport writes are failing"
+          description: "Inspect transport outcome metrics and Collector exporter health before increasing retry queues."
+
+      - alert: NextLoggersRecordsDropped
+        expr: sum(increase(next_loggers_transport_dropped_total[10m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A bounded logger transport dropped records"
+          description: "Review the bounded drop reason and queue pressure; never replace bounded queues with unbounded memory."
+
+      - alert: NextLoggersPendingWritesHigh
+        expr: max(next_loggers_pending_writes) > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Logger pending-write backlog is elevated"
+          description: "Pending writes have remained above 500 for five minutes."
+
+      - alert: OpenTelemetryCollectorExportFailures
+        expr: |
+          sum by (exporter) (rate(otelcol_exporter_send_failed_log_records_total[5m])) > 0
+          or sum by (exporter) (rate(otelcol_exporter_send_failed_spans_total[5m])) > 0
+          or sum by (exporter) (rate(otelcol_exporter_send_failed_metric_points_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenTelemetry Collector exporter is failing"
+          description: "Exporter {{ $labels.exporter }} has failed telemetry delivery during the last five minutes."
+
+      - alert: OpenTelemetryCollectorRefusedTelemetry
+        expr: |
+          sum(rate(otelcol_processor_refused_log_records_total[5m])) > 0
+          or sum(rate(otelcol_processor_refused_spans_total[5m])) > 0
+          or sum(rate(otelcol_processor_refused_metric_points_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenTelemetry Collector is refusing telemetry"
+          description: "Check memory-limiter pressure and upstream retry behavior."

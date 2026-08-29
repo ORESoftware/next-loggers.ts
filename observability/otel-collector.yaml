@@ -7,24 +7,25 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
-        max_recv_msg_size_mib: 8
       http:
         endpoint: 0.0.0.0:4318
-        max_request_body_size: 8388608
-        # Deliberately no CORS configuration. Browser and distributed clients
-        # use the authenticated Supabase transport instead of direct OTLP.
+        cors:
+          allowed_origins: []
 
 processors:
   memory_limiter:
     check_interval: 1s
     limit_mib: 384
-    spike_limit_mib: 96
+    spike_limit_mib: 64
 
-  resource/harden:
+  resource/environment:
     attributes:
       - key: deployment.environment.name
         value: ${env:DEPLOYMENT_ENVIRONMENT}
-        action: insert
+        action: upsert
+
+  resource/redact:
+    attributes:
       - key: authorization
         action: delete
       - key: http.request.header.authorization
@@ -33,11 +34,21 @@ processors:
         action: delete
       - key: http.response.header.set-cookie
         action: delete
-      - key: db.connection_string
+      - key: password
         action: delete
-      - key: enduser.email
+      - key: token
         action: delete
-      - key: enduser.id
+      - key: access_token
+        action: delete
+      - key: refresh_token
+        action: delete
+      - key: email
+        action: delete
+      - key: user.email
+        action: delete
+      - key: phone
+        action: delete
+      - key: user.phone_number
         action: delete
 
   attributes/redact:
@@ -50,93 +61,85 @@ processors:
         action: delete
       - key: http.response.header.set-cookie
         action: delete
-      - key: db.connection_string
+      - key: password
         action: delete
-      - key: enduser.email
+      - key: token
         action: delete
-      - key: enduser.id
+      - key: access_token
+        action: delete
+      - key: refresh_token
+        action: delete
+      - key: email
         action: delete
       - key: user.email
         action: delete
-      - key: user.phone
+      - key: phone
+        action: delete
+      - key: user.phone_number
         action: delete
 
-  batch/logs:
+  batch:
     timeout: 1s
-    send_batch_size: 512
-    send_batch_max_size: 1024
-  batch/metrics:
-    timeout: 5s
     send_batch_size: 1024
     send_batch_max_size: 2048
-  batch/traces:
-    timeout: 1s
-    send_batch_size: 512
-    send_batch_max_size: 1024
 
 exporters:
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 2048
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+
   otlp/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
-    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 2048
     retry_on_failure:
       enabled: true
       initial_interval: 1s
-      max_interval: 10s
+      max_interval: 30s
       max_elapsed_time: 5m
-    sending_queue:
-      enabled: true
-      sizer: items
-      queue_size: 10000
-      num_consumers: 4
-      block_on_overflow: false
-
-  otlphttp/loki:
-    endpoint: http://loki:3100/otlp
-    compression: gzip
-    timeout: 10s
-    retry_on_failure:
-      enabled: true
-      initial_interval: 1s
-      max_interval: 10s
-      max_elapsed_time: 5m
-    sending_queue:
-      enabled: true
-      sizer: items
-      queue_size: 10000
-      num_consumers: 4
-      block_on_overflow: false
 
   prometheus:
     endpoint: 0.0.0.0:9464
     enable_open_metrics: true
-    send_timestamps: true
-    metric_expiration: 5m
+    resource_to_telemetry_conversion:
+      enabled: false
 
 service:
   extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/environment, resource/redact, attributes/redact, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/environment, resource/redact, attributes/redact, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/environment, resource/redact, attributes/redact, batch]
+      exporters: [otlphttp/loki]
   telemetry:
     logs:
       level: info
       encoding: json
     metrics:
+      level: detailed
       readers:
         - pull:
             exporter:
               prometheus:
                 host: 0.0.0.0
                 port: 8888
-  pipelines:
-    logs:
-      receivers: [otlp]
-      processors: [memory_limiter, resource/harden, attributes/redact, batch/logs]
-      exporters: [otlphttp/loki]
-    metrics:
-      receivers: [otlp]
-      processors: [memory_limiter, resource/harden, attributes/redact, batch/metrics]
-      exporters: [prometheus]
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter, resource/harden, attributes/redact, batch/traces]
-      exporters: [otlp/tempo]

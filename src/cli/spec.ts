@@ -300,8 +300,67 @@ export const COMMANDS: CommandSpec[] = [
     ],
   },
   {
+    name: 'packages',
+    summary: 'List independently publishable Zed/native packages and verify release metadata.',
+    flags: [
+      {
+        key: 'target',
+        env: 'NEXT_LOGGER_CLI_PACKAGE_TARGETS',
+        aliases: ['target'],
+        short: 't',
+        type: 'array',
+        help: 'Release target filter; repeatable. See the detailed CLI documentation.',
+      },
+      {
+        key: 'registry',
+        env: 'NEXT_LOGGER_CLI_PACKAGE_REGISTRIES',
+        aliases: ['registry'],
+        short: 'R',
+        type: 'array',
+        help: 'Registry filter; repeatable. See the detailed CLI documentation.',
+      },
+      {
+        key: 'release_version',
+        env: 'NEXT_LOGGER_CLI_RELEASE_VERSION',
+        aliases: ['release-version'],
+        type: 'string',
+        help: 'Semantic version used to render immutable release tags; defaults to package.json.',
+      },
+      {
+        key: 'check',
+        env: 'NEXT_LOGGER_CLI_PACKAGES_CHECK',
+        aliases: ['check'],
+        type: 'bool',
+        default: 'false',
+        help: 'Verify the compiled release catalog against package.json and .zpkg.toml.',
+      },
+    ],
+  },
+  {
+    name: 'lint',
+    summary: 'Report next-loggers events that are built but never sent, in every supported language.',
+    positionals: ['paths...'],
+    flags: [
+      {
+        key: 'logger_name',
+        env: 'NEXT_LOGGER_CLI_LINT_LOGGER_NAMES',
+        aliases: ['logger-name'],
+        type: 'array',
+        help: 'Extra variable or property path holding a next-loggers logger; repeatable.',
+      },
+      {
+        key: 'all',
+        env: 'NEXT_LOGGER_CLI_LINT_ALL',
+        aliases: ['all'],
+        type: 'bool',
+        default: 'false',
+        help: 'Check every supported source file, including files without a next-loggers import.',
+      },
+    ],
+  },
+  {
     name: 'flags',
-    summary: 'Print the flag/env contract, or check it against .cli-flags.toml.',
+    summary: 'Print the command/flag/env documentation, or check it against .cli-flags.toml.',
     flags: [
       {
         key: 'check',
@@ -309,7 +368,7 @@ export const COMMANDS: CommandSpec[] = [
         aliases: ['check'],
         type: 'bool',
         default: 'false',
-        help: 'Exit 1 if .cli-flags.toml has drifted from the compiled spec.',
+        help: 'Exit 1 if .cli-flags.toml command, flag, env, or help metadata has drifted.',
       },
     ],
   },

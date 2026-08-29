@@ -101,8 +101,7 @@ Prometheus scrapes:
 
 The included alerts cover target availability, Prometheus reload failures,
 logger transport failures, bounded-queue drops, and sustained pending-write
-backlogs. The provisioned Grafana dashboard visualizes the same logger health
-signals and recent error/fatal logs.
+backlogs. The provisioned Grafana dashboards (`next-loggers-health` and `next-loggers-overview`) visualize the same logger health signals, operational correlations, and recent error/fatal logs.
 
 ## Security and failure boundaries
 
