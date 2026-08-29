@@ -1,7 +1,7 @@
 {
   "name": "@oresoftware/next-loggers",
   "version": "0.1.0",
-  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, and edge workers",
+  "description": "Runtime-aware structured loggers with native SDKs for JavaScript/TypeScript, Python, Go, Rust, WebAssembly, Java, Dart, Ruby, Gleam, Erlang, and Elixir",
   "type": "module",
   "types": "./dist/base-logger.d.ts",
   "sideEffects": false,

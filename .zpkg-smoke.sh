@@ -4,6 +4,7 @@ set -eu
 root=${ZED_PKG_TEST_TARGET:?ZED_PKG_TEST_TARGET is required}
 test -f "$root/.zpkg.toml"
 test -f "$root/package.json"
+test -f "$root/dist/base-logger.js"
 test -f "$root/sdk/nodejs/package.json"
 test -f "$root/sdk/nodejs/dist/base-logger.js"
 test -f "$root/sdk/python/pyproject.toml"

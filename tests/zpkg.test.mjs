@@ -15,6 +15,7 @@ const lock = await read('.zpkg.lock');
 const zedInclude = await read('.zedinclude');
 
 const expectedTargets = {
+  repository: { dir: '.', adapter: 'none' },
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
   nodejs: {
     dir: 'sdk/nodejs',
@@ -125,9 +126,11 @@ test('all language slices are explicit, unique, and registry-correct', () => {
     const actual = manifest.targets[target];
     assert.deepEqual(actual, expected, `${target} target drifted`);
     assert.equal(dirs.has(actual.dir), false, `duplicate target directory: ${actual.dir}`);
-    assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
     dirs.add(actual.dir);
-    names.add(actual.name);
+    if (actual.name !== undefined) {
+      assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+      names.add(actual.name);
+    }
     if (actual.native) {
       assert.equal(tags.has(actual.native.tag_format), false, `duplicate native tag: ${actual.native.tag_format}`);
       tags.add(actual.native.tag_format);
@@ -165,6 +168,7 @@ test('generated Node release files use a bounded Zed allowlist', () => {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'));
   assert.deepEqual(patterns, [
+    'dist/**',
     'sdk/nodejs/.cli-flags.toml',
     'sdk/nodejs/LICENSE',
     'sdk/nodejs/README.md',
@@ -205,6 +209,7 @@ test('all native package versions are synchronized', async () => {
 test('the staged npm manifest is publish-only and preserves the public surface', () => {
   assert.equal(nodePackage.name, pkg.name);
   assert.equal(nodePackage.version, pkg.version);
+  assert.equal(nodePackage.description, pkg.description);
   assert.deepEqual(nodePackage.exports, pkg.exports);
   assert.deepEqual(nodePackage.bin, pkg.bin);
   assert.equal(nodePackage.scripts, undefined);
@@ -230,7 +235,9 @@ test('the repository URL and slugs satisfy Zed validation', () => {
   const slug = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
   assert.match(manifest.package.org, slug);
   assert.match(manifest.package.name, slug);
-  for (const target of Object.values(manifest.targets)) assert.match(target.name, slug);
+  for (const target of Object.values(manifest.targets)) {
+    if (target.name !== undefined) assert.match(target.name, slug);
+  }
   assert.equal(manifest.package.repository.vcs, 'git');
   assert.match(manifest.package.repository.url, /^(?:https?|ssh|git|git\+ssh):\/\//);
 });

@@ -308,7 +308,7 @@ export function lintSource(
     fromPath === 'javascript' || fromPath === 'typescript' ? fromPath : 'typescript';
   return checkSource(source, language, {
     file,
-    loggerNames: options.loggerNames,
+    ...(options.loggerNames === undefined ? {} : { loggerNames: options.loggerNames }),
     requireImport: !options.all && (options.loggerNames?.length ?? 0) === 0,
   });
 }

@@ -52,7 +52,13 @@ test('the package catalog has one independent route per documented release targe
 });
 
 test('the compiled catalog agrees with every Zed native mirror declaration', () => {
-  assert.deepEqual(Object.keys(zpkg.targets).sort(), [...ZED_TARGET_NAMES].sort());
+  assert.deepEqual(zpkg.targets.repository, { dir: '.', adapter: 'none' });
+  assert.deepEqual(
+    Object.keys(zpkg.targets)
+      .filter((target) => target !== 'repository')
+      .sort(),
+    [...ZED_TARGET_NAMES].sort(),
+  );
   const zed = PACKAGE_RELEASES.find((release) => release.target === 'zed');
   assert.ok(zed);
   assert.equal(`${zpkg.package.org}/${zpkg.package.name}`, zed.packageName);

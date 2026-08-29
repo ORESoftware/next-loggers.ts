@@ -11,6 +11,9 @@
   "files": [
     "dist",
     "src",
+    "sdk",
+    "contracts",
+    "docs",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -89,6 +92,14 @@
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
+    "./shutdown": {
+      "types": "./dist/shutdown.d.ts",
+      "default": "./dist/shutdown.js"
+    },
+    "./shutdown/node": {
+      "types": "./dist/node-shutdown.d.ts",
+      "default": "./dist/node-shutdown.js"
+    },
     "./browser-stream": {
       "types": "./dist/browser-stream.d.ts",
       "default": "./dist/browser-stream.js"
@@ -100,6 +111,18 @@
     "./prometheus": {
       "types": "./dist/prometheus.d.ts",
       "default": "./dist/prometheus.js"
+    },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
     },
     "./supabase-ingest": {
       "types": "./dist/supabase-ingest.d.ts",
@@ -139,11 +162,6 @@
     "access": "public",
     "provenance": true
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ores-otel/ores.otel.log.git",
-    "directory": "sdk/nodejs"
-  },
   "homepage": "https://github.com/ores-otel/ores.otel.log#readme",
   "bugs": {
     "url": "https://github.com/ores-otel/ores.otel.log/issues"
@@ -166,11 +184,24 @@
     "nextjs",
     "esm",
     "supabase",
+    "wasm",
+    "rust",
+    "go",
+    "gleam",
+    "java",
+    "erlang",
+    "elixir",
+    "dart",
     "bun",
     "deno",
     "edge",
     "cloudflare-workers",
     "workerd"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ores-otel/ores.otel.log.git",
+    "directory": "sdk/nodejs"
+  }
 }
