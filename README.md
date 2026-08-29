@@ -1,3 +1,6 @@
+<!-- ores-otel-canonical -->
+> **Canonical repository:** [`ores-otel/ores.otel.log`](https://github.com/ores-otel/ores.otel.log). `ORESoftware/next-loggers.ts` remains the legacy compatibility remote.
+
 # @oresoftware/next-loggers
 
 Dependency-free, ESM-only loggers for Next.js, browsers, edge workers, Cloudflare Workers, Node.js, Bun, and Deno. Log events are chainable, safely serialized, and can be sent to HTTP endpoints or streamed over Supabase Realtime WebSockets.
@@ -265,6 +268,34 @@ const transport: LogTransport = {
   },
 };
 ```
+
+### Route OpenTelemetry per event
+
+OpenTelemetry transports receive records by default. Set `otel: false` on a
+logger to make them opt-in, then override one event without changing delivery
+to HTTP, Supabase, memory, or any other transport:
+
+```ts
+const log = createLogger({
+  otel: false,
+  transports: [otelTransport, supabaseTransport],
+});
+
+await log.info('sampled in').useOtel().send();
+await log.warn('OTEL excluded').notOtel().send();
+await log.info('computed').withOtel(routeToOtel).send();
+await log.info('back to default').useOtel().resetOtel().send();
+```
+
+`event.isOtelEnabled(fallback)` resolves the per-event value. Logger
+`setOtelEnabled()`, `useOtel()`, and `notOtel()` update the default in the
+options object, so `anew()` children inherit it. An OTEL transport is identified
+by `otel: true` or the name `opentelemetry`; the built-in bridge sets both.
+
+`withOpenTelemetry(options, bridge)` appends the built-in bridge while
+preserving existing transports. If the bridge supplies `activeSpan`, it also
+installs span correlation unless the options already contain an explicit
+`contextProvider`.
 
 ## Error tracking
 
@@ -658,6 +689,7 @@ await new AuditLogger().info('changed role').withActor('user-1').send();
 - Set `autoSend: true` to enqueue `.send()` in a microtask.
 - Console output is enabled by default; set `console: false` to disable it.
 - `.send(false)` writes to the console but skips remote transports.
+- `.notOtel()` skips only OTEL transports; all other transports still receive the record.
 - `.flush()` waits for pending transport writes; pass `sendUnsent: true` to recover unfinished chains.
 - `.flushOnExit()` sends unfinished chains and runs transport shutdown hooks.
 - `.close()` performs the shutdown flush and then closes transports.

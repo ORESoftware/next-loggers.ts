@@ -7,6 +7,6 @@
   {env, []},
   {licenses, ["MIT"]},
   {links, [
-    {"GitHub", "https://github.com/ORESoftware/next-loggers.ts"},
-    {"Changelog", "https://github.com/ORESoftware/next-loggers.ts/blob/main/sdk/erlang/CHANGELOG.md"}
+    {"GitHub", "https://github.com/ores-otel/ores.otel.log"},
+    {"Changelog", "https://github.com/ores-otel/ores.otel.log/blob/main/sdk/erlang/CHANGELOG.md"}
   ]}]}.

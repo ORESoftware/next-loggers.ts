@@ -56,12 +56,16 @@ export interface LogRecord {
 
 export interface LogTransport {
   readonly name?: string;
+<<<<<<< HEAD
   /**
    * Marks a transport as an OpenTelemetry bridge so per-event `useOtel()` /
    * `notOtel()` can route around it. Transports created by
    * `@oresoftware/next-loggers/otel` set this; a hand-rolled OTEL transport
    * should set it too (the name 'opentelemetry' is also recognized).
    */
+=======
+  /** Marks a transport as an OpenTelemetry bridge for per-event routing. */
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   readonly otel?: boolean;
   write(record: LogRecord): void | Promise<void>;
   flush?(): void | Promise<void>;
@@ -182,12 +186,16 @@ export interface LoggerOptions {
   console?: boolean;
   autoSend?: boolean;
   transports?: LogTransport | LogTransport[];
+<<<<<<< HEAD
   /**
    * Default routing for OTEL transports. `true` (the default) delivers every
    * record to them; `false` makes OpenTelemetry opt-in per event via
    * `logger.info(...).useOtel().send()`. Either way an individual event wins:
    * `useOtel()` forces delivery, `notOtel()` forces a skip.
    */
+=======
+  /** Default OpenTelemetry routing policy. Defaults to true. */
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   otel?: boolean;
   http?: HttpTransportOptions;
   supabase?: SupabaseRealtimeOptions;
@@ -1038,6 +1046,7 @@ export class LogEvent {
   protected context: LogArgument[] = [];
   protected meta: LogArgument[] = [];
   protected stackTrace: string[] = [];
+  protected otelEnabled: boolean | undefined;
   protected sendPromise: Promise<void> | null = null;
   protected record: LogRecord | null = null;
   /** undefined = follow the logger default; true/false = explicit per-event choice. */
@@ -1054,16 +1063,25 @@ export class LogEvent {
     return this;
   }
 
+<<<<<<< HEAD
   /** Forces this record onto OTEL transports, even when the logger opts out by default. */
+=======
+  /** Force this record onto OpenTelemetry transports. */
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   useOtel(): this {
     return this.withOtel(true);
   }
 
+<<<<<<< HEAD
   /** Keeps this record off OTEL transports; all other transports still receive it. */
+=======
+  /** Keep this record off OpenTelemetry transports without affecting other transports. */
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   notOtel(): this {
     return this.withOtel(false);
   }
 
+<<<<<<< HEAD
   /** Programmatic form of useOtel()/notOtel(), for a flag computed at runtime. */
   withOtel(enabled: boolean): this {
     this.otelPreference = Boolean(enabled);
@@ -1079,6 +1097,23 @@ export class LogEvent {
   /** Resolves the per-event choice against the logger default. */
   isOtelEnabled(fallback: boolean): boolean {
     return this.otelPreference ?? fallback;
+=======
+  /** Set the per-record OpenTelemetry decision from a runtime-computed flag. */
+  withOtel(enabled: boolean): this {
+    this.otelEnabled = Boolean(enabled);
+    return this;
+  }
+
+  /** Drop the per-record decision so the logger default applies again. */
+  resetOtel(): this {
+    this.otelEnabled = undefined;
+    return this;
+  }
+
+  /** Resolve the per-record preference against the supplied logger default. */
+  isOtelEnabled(fallback: boolean): boolean {
+    return this.otelEnabled ?? Boolean(fallback);
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   }
 
   addTrace(id: string, options?: { makeFirst?: boolean }): this {
@@ -1411,25 +1446,41 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
     return this.maxLevel;
   }
 
+<<<<<<< HEAD
   /**
    * Default routing for OTEL transports when an event says nothing. Written
    * through into options so anew() children inherit it.
    */
+=======
+  /** Resolve this logger's default OpenTelemetry policy (default true). */
+  isOtelEnabled(): boolean {
+    return this.options.otel ?? true;
+  }
+
+  /** Update the inherited logger default used by future and existing events without overrides. */
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   setOtelEnabled(enabled: boolean): this {
     (this.options as LoggerOptions).otel = Boolean(enabled);
     return this;
   }
 
+<<<<<<< HEAD
   /** Sends every record to OTEL transports unless the event calls notOtel(). */
+=======
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   useOtel(): this {
     return this.setOtelEnabled(true);
   }
 
+<<<<<<< HEAD
   /** Makes OTEL opt-in: only events calling useOtel() reach OTEL transports. */
+=======
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   notOtel(): this {
     return this.setOtelEnabled(false);
   }
 
+<<<<<<< HEAD
   isOtelEnabled(): boolean {
     return this.options.otel ?? true;
   }
@@ -1447,6 +1498,8 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
     return this.transports.filter((transport) => !this.isOtelTransport(transport));
   }
 
+=======
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
   anew(options: LoggerOptions = {}): BaseLogger<TEvent> {
     return new BaseLogger<TEvent>(
       {
@@ -1529,7 +1582,18 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
         return;
       }
       const results = await Promise.allSettled(
+<<<<<<< HEAD
         targets.map(async (transport) => transport.write(record)),
+=======
+        this.transports.map(async (transport) => {
+          const isOtelTransport =
+            transport.otel === true || transport.name?.toLowerCase() === 'opentelemetry';
+          if (isOtelTransport && !event.isOtelEnabled(this.isOtelEnabled())) {
+            return;
+          }
+          await transport.write(record);
+        }),
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
       );
       for (let index = 0; index < results.length; index += 1) {
         const result = results[index];

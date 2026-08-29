@@ -5,6 +5,14 @@
     new/4,
     current_context/0,
     with_context/2,
+    event/4,
+    send/1,
+    with_otel/2,
+    use_otel/1,
+    not_otel/1,
+    reset_otel/1,
+    is_otel_enabled/2,
+    set_otel_enabled/2,
     log/4,
     log/5,
     info/3,
@@ -28,6 +36,7 @@ new(AppName, Runtime, Fields, Transports)
         when is_binary(AppName), is_binary(Runtime), is_map(Fields), is_list(Transports) ->
     case byte_size(AppName) of
         0 -> error({invalid_app_name, AppName});
+<<<<<<< HEAD
         _ -> #{
             app_name => AppName,
             runtime => Runtime,
@@ -36,6 +45,9 @@ new(AppName, Runtime, Fields, Transports)
             %% Default routing for OTEL transports when a call says nothing.
             otel => true
         }
+=======
+        _ -> #{app_name => AppName, runtime => Runtime, fields => Fields, transports => Transports, otel => true}
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
     end.
 
 current_context() ->
@@ -78,6 +90,7 @@ warn(Logger, Message, Fields) ->
 error(Logger, Message, Fields) ->
     log(Logger, <<"ERROR">>, Message, Fields).
 
+<<<<<<< HEAD
 log(Logger, Level, Message, EventFields) ->
     log(Logger, Level, Message, EventFields, otel_enabled(Logger)).
 
@@ -86,6 +99,57 @@ log(Logger, Level, Message, EventFields, Otel)
         when is_map(Logger), is_binary(Level), is_binary(Message), is_map(EventFields),
              is_boolean(Otel) ->
     Context = current_context(),
+=======
+log(Logger, Level, Message, EventFields)
+        when is_map(Logger), is_binary(Level), is_binary(Message), is_map(EventFields) ->
+    send(event(Logger, Level, Message, EventFields)).
+
+event(Logger, Level, Message, EventFields)
+        when is_map(Logger), is_binary(Level), is_binary(Message), is_map(EventFields) ->
+    #{
+        kind => event,
+        logger => Logger,
+        level => Level,
+        message => Message,
+        fields => EventFields,
+        context => current_context(),
+        otel_enabled => undefined
+    }.
+
+set_otel_enabled(Logger, Enabled) when is_map(Logger), is_boolean(Enabled) ->
+    maps:put(otel, Enabled, Logger).
+
+use_otel(Value) when is_map(Value) ->
+    case maps:get(kind, Value, logger) of
+        event -> with_otel(Value, true);
+        logger -> set_otel_enabled(Value, true)
+    end.
+
+not_otel(Value) when is_map(Value) ->
+    case maps:get(kind, Value, logger) of
+        event -> with_otel(Value, false);
+        logger -> set_otel_enabled(Value, false)
+    end.
+
+with_otel(Event, Enabled) when is_map(Event), is_boolean(Enabled) ->
+    maps:put(otel_enabled, Enabled, Event).
+
+reset_otel(Event) when is_map(Event) ->
+    maps:put(otel_enabled, undefined, Event).
+
+is_otel_enabled(Event, Fallback) when is_map(Event), is_boolean(Fallback) ->
+    case maps:get(otel_enabled, Event, undefined) of
+        undefined -> Fallback;
+        Enabled -> Enabled
+    end.
+
+send(Event) when is_map(Event) ->
+    Logger = maps:get(logger, Event),
+    Level = maps:get(level, Event),
+    Message = maps:get(message, Event),
+    EventFields = maps:get(fields, Event),
+    Context = maps:get(context, Event, #{}),
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
     LoggerFields = maps:get(fields, Logger, #{}),
     ContextFields = maps:get(fields, Context, #{}),
     Fields0 = maps:merge(LoggerFields, ContextFields),
@@ -116,8 +180,19 @@ log(Logger, Level, Message, EventFields, Otel)
         [] -> Record2;
         _ -> maps:put(tags, Tags, Record2)
     end,
+<<<<<<< HEAD
     lists:foreach(
         fun(Transport) -> deliver(Transport, Record, Otel) end,
+=======
+    OtelEnabled = is_otel_enabled(Event, maps:get(otel, Logger, true)),
+    lists:foreach(
+        fun(Transport) ->
+            case is_otel_transport(Transport) andalso not OtelEnabled of
+                true -> ok;
+                false -> ok = deliver_transport(Transport, Record)
+            end
+        end,
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
         maps:get(transports, Logger, [])
     ),
     Record.
@@ -131,7 +206,11 @@ deliver(Fun, Record, _Otel) when is_function(Fun, 1) -> ok = Fun(Record).
 %% Application-owned OpenTelemetry adapter. It emits data but never installs
 %% a tracer, logger provider, context manager, or automatic instrumentation.
 otel_transport(Sink) when is_function(Sink, 1) ->
+<<<<<<< HEAD
     {otel, fun(Record) ->
+=======
+    {opentelemetry, fun(Record) ->
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
         Level = maps:get(level, Record),
         Fields = maps:get(fields, Record, #{}),
         Attributes0 = #{
@@ -160,7 +239,13 @@ otel_transport(Sink) when is_function(Sink, 1) ->
 
 %% Client transport with an injected authenticated Supabase sender.
 supabase_transport(Sender) when is_function(Sender, 1) ->
-    fun(Record) -> Sender(Record), ok end.
+    {supabase, fun(Record) -> Sender(Record), ok end}.
+
+is_otel_transport({Name, _}) when Name =:= opentelemetry; Name =:= <<"opentelemetry">> -> true;
+is_otel_transport(_) -> false.
+
+deliver_transport({_Name, Transport}, Record) when is_function(Transport, 1) -> Transport(Record);
+deliver_transport(Transport, Record) when is_function(Transport, 1) -> Transport(Record).
 
 severity_number(<<"TRACE">>) -> 1;
 severity_number(<<"DEBUG">>) -> 5;

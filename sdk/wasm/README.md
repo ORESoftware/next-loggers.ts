@@ -6,6 +6,7 @@ crate does not install global OpenTelemetry providers or patch a host runtime.
 
 The crate is suitable for `wasm32-unknown-unknown` and native conformance tests.
 
+<<<<<<< HEAD
 ## OpenTelemetry on or off, per call
 
 `OpenTelemetryTransport` returns `true` from `Transport::is_otel`, so a record
@@ -18,3 +19,21 @@ logger.log_with(LogLevel::Warn, "noisy poll", None, fields, Some(false))?;
 `Logger::use_otel()` / `not_otel()` set the default for calls that pass `None`.
 This core delivers inside `log`, so there is no deferred event to forget to
 send.
+=======
+## Per-event OpenTelemetry routing
+
+OpenTelemetry is enabled by default. Configure an opt-in logger with
+`with_otel_enabled(false)` and use `event` for a record override:
+
+```rust
+let logger = Logger::new("app")?.with_otel_enabled(false);
+logger.event(LogLevel::Info, "sampled in", None, BTreeMap::new()).use_otel().send()?;
+logger.event(LogLevel::Warn, "OTEL excluded", None, BTreeMap::new()).not_otel().send()?;
+logger.event(LogLevel::Info, "computed", None, BTreeMap::new()).with_otel(route_to_otel).send()?;
+```
+
+`reset_otel()` restores the logger default and `is_otel_enabled(fallback)`
+resolves it. Mutable `set_otel_enabled` updates an existing logger; the builder
+`use_otel`/`not_otel` forms set the inherited default. Regular host transports
+still receive records excluded from OTEL.
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666

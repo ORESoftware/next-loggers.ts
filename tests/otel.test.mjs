@@ -291,6 +291,7 @@ test('provider lookup failures and diagnostic failures never escape into applica
   assert.deepEqual(diagnostics, [['active-span', 'context manager unavailable']]);
 });
 
+<<<<<<< HEAD
 test('useOtel()/notOtel() route individual events around OTEL transports', async () => {
   const emitted = [];
   const other = [];
@@ -408,4 +409,34 @@ test('withOpenTelemetry() wires transport, correlation, and default routing in o
     emitted.map((entry) => entry.body),
     ['exported'],
   );
+=======
+test('withOpenTelemetry preserves transports and explicit context while installing correlation by default', async () => {
+  const emitted = [];
+  const regular = [];
+  const explicitContext = () => ({ fields: { source: 'explicit' } });
+  const bridge = {
+    logger: { emit: (value) => emitted.push(value) },
+    activeSpan: () => ({
+      spanContext: () => ({ traceId: TRACE_ID, spanId: SPAN_ID, traceFlags: 1 }),
+      addEvent() {},
+    }),
+  };
+  const options = withOpenTelemetry(
+    {
+      appName: 'helper',
+      console: false,
+      contextProvider: explicitContext,
+      transports: { name: 'memory', write: (value) => regular.push(value) },
+    },
+    bridge,
+  );
+  assert.equal(options.contextProvider, explicitContext);
+  assert.equal(options.transports.length, 2);
+  await createLogger(options).info('helper-event').send();
+  assert.equal(regular.length, 1);
+  assert.equal(emitted.length, 1);
+
+  const correlated = withOpenTelemetry({ console: false }, bridge);
+  assert.equal(correlated.contextProvider().traceId, TRACE_ID);
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
 });

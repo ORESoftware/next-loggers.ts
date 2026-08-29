@@ -74,6 +74,7 @@ public final class NextLoggersTest {
     }
 
     List<Map<String, Object>> routedOtel = new ArrayList<>();
+<<<<<<< HEAD
     List<Map<String, Object>> routedAll = new ArrayList<>();
     NextLoggers.Logger routed =
         new NextLoggers.Logger(
@@ -89,6 +90,36 @@ public final class NextLoggersTest {
     assert "opted back in".equals(routedOtel.get(1).get("body"));
     assert routedAll.size() == 3 : "other transports must receive every record";
     assert routed.otelEnabled() : "notOtel() must return a derived logger";
+=======
+    List<Map<String, Object>> regular = new ArrayList<>();
+    NextLoggers.Logger routedLogger =
+        new NextLoggers.Logger(
+            "routing",
+            null,
+            "java",
+            Map.of(),
+            List.of(
+                new NextLoggers.OtelTransport(routedOtel::add),
+                new NextLoggers.SupabaseTransport(regular::add)),
+            false);
+    NextLoggers.LogEvent defaultOff =
+        routedLogger.event(NextLoggers.Level.INFO, "default-off", Map.of());
+    assert !defaultOff.isOtelEnabled(routedLogger.isOtelEnabled());
+    defaultOff.send();
+    routedLogger.event(NextLoggers.Level.INFO, "forced-on", Map.of()).useOtel().send();
+    routedLogger
+        .event(NextLoggers.Level.INFO, "reset-off", Map.of())
+        .useOtel()
+        .resetOtel()
+        .send();
+    routedLogger.useOtel();
+    routedLogger.event(NextLoggers.Level.WARN, "forced-off", Map.of()).notOtel().send();
+    routedLogger.event(NextLoggers.Level.INFO, "logger-on", Map.of()).withOtel(true).send();
+    assert routedOtel.stream().map(value -> value.get("body")).toList()
+        .equals(List.of("forced-on", "logger-on"));
+    assert regular.stream().map(value -> value.get("message")).toList()
+        .equals(List.of("default-off", "forced-on", "reset-off", "forced-off", "logger-on"));
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
 
     System.out.println("Java next-loggers conformance passed");
   }

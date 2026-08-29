@@ -77,12 +77,21 @@ public final class NextLoggers {
   public interface Transport {
     void write(Map<String, Object> record) throws Exception;
 
+<<<<<<< HEAD
     /**
      * Marks this transport as an OpenTelemetry bridge so {@code logger.notOtel()} can route around
      * it. {@link OtelTransport} already reports {@code true}.
      */
     default boolean isOtel() {
       return false;
+=======
+    default boolean isOtel() {
+      return "opentelemetry".equalsIgnoreCase(name());
+    }
+
+    default String name() {
+      return "";
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
     }
   }
 
@@ -120,6 +129,16 @@ public final class NextLoggers {
       otelRecord.put("attributes", Collections.unmodifiableMap(attributes));
       sink.accept(Collections.unmodifiableMap(otelRecord));
     }
+
+    @Override
+    public boolean isOtel() {
+      return true;
+    }
+
+    @Override
+    public String name() {
+      return "opentelemetry";
+    }
   }
 
   /** Client-safe Supabase transport; the application supplies its authenticated sender. */
@@ -136,13 +155,60 @@ public final class NextLoggers {
     }
   }
 
+  public static final class LogEvent {
+    private final Logger logger;
+    private final Level level;
+    private final String message;
+    private final Map<String, Object> fields;
+    private final Context context;
+    private Boolean otelEnabled;
+
+    private LogEvent(Logger logger, Level level, String message, Map<String, Object> fields) {
+      this.logger = logger;
+      this.level = Objects.requireNonNull(level, "level");
+      this.message = message;
+      this.fields = immutableCopy(fields);
+      this.context = currentContext();
+    }
+
+    public LogEvent useOtel() {
+      return withOtel(true);
+    }
+
+    public LogEvent notOtel() {
+      return withOtel(false);
+    }
+
+    public LogEvent withOtel(boolean enabled) {
+      this.otelEnabled = enabled;
+      return this;
+    }
+
+    public LogEvent resetOtel() {
+      this.otelEnabled = null;
+      return this;
+    }
+
+    public boolean isOtelEnabled(boolean fallback) {
+      return otelEnabled == null ? fallback : otelEnabled;
+    }
+
+    public Map<String, Object> send() throws Exception {
+      return logger.emitEvent(this);
+    }
+  }
+
   public static final class Logger {
     private final String appName;
     private final String name;
     private final String runtime;
     private final Map<String, Object> fields;
     private final List<Transport> transports;
+<<<<<<< HEAD
     private final boolean otel;
+=======
+    private volatile boolean otelEnabled;
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
 
     public Logger(
         String appName,
@@ -159,13 +225,21 @@ public final class NextLoggers {
         String runtime,
         Map<String, Object> fields,
         List<Transport> transports,
+<<<<<<< HEAD
         boolean otel) {
+=======
+        boolean otelEnabled) {
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
       this.appName = requireText(appName, "appName");
       this.name = name;
       this.runtime = runtime == null || runtime.isBlank() ? "java" : runtime;
       this.fields = immutableCopy(fields);
       this.transports = transports == null ? List.of() : List.copyOf(transports);
+<<<<<<< HEAD
       this.otel = otel;
+=======
+      this.otelEnabled = otelEnabled;
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
     }
 
     public Logger(String appName, List<Transport> transports) {
@@ -198,8 +272,35 @@ public final class NextLoggers {
 
     public Map<String, Object> log(Level level, String message, Map<String, Object> eventFields)
         throws Exception {
-      Objects.requireNonNull(level, "level");
-      Context context = currentContext();
+      return event(level, message, eventFields).send();
+    }
+
+    public LogEvent event(Level level, String message, Map<String, Object> eventFields) {
+      return new LogEvent(this, level, message, eventFields);
+    }
+
+    public Logger setOtelEnabled(boolean enabled) {
+      this.otelEnabled = enabled;
+      return this;
+    }
+
+    public Logger useOtel() {
+      return setOtelEnabled(true);
+    }
+
+    public Logger notOtel() {
+      return setOtelEnabled(false);
+    }
+
+    public boolean isOtelEnabled() {
+      return otelEnabled;
+    }
+
+    private Map<String, Object> emitEvent(LogEvent event) throws Exception {
+      Level level = event.level;
+      String message = event.message;
+      Map<String, Object> eventFields = event.fields;
+      Context context = event.context;
       Map<String, Object> mergedFields = new LinkedHashMap<>(fields);
       if (context != null) {
         mergedFields.putAll(context.fields());
@@ -233,7 +334,11 @@ public final class NextLoggers {
       }
       Map<String, Object> immutable = Collections.unmodifiableMap(record);
       for (Transport transport : transports) {
+<<<<<<< HEAD
         if (!otel && transport.isOtel()) {
+=======
+        if (transport.isOtel() && !event.isOtelEnabled(otelEnabled)) {
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
           continue;
         }
         transport.write(immutable);

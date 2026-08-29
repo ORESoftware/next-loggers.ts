@@ -41,6 +41,7 @@ let otel = logging.otel_transport(emit_to_otel)
 let supabase = logging.supabase_transport(send_to_supabase)
 ```
 
+<<<<<<< HEAD
 ## OpenTelemetry on or off, per event
 
 `otel_transport` sets `is_otel: True` on the transport, so a single record can
@@ -68,3 +69,24 @@ pipelines:
 ```sh
 npx next-loggers lint src/
 ```
+=======
+## Per-event OpenTelemetry routing
+
+`Options.otel` defaults to `True`. Set it to `False` for opt-in telemetry and
+override the event before `send`:
+
+```gleam
+let logger = logging.new(logging.Options(..options, otel: False), otel)
+logging.info(logger, "sampled in", [])
+|> logging.event_use_otel
+|> logging.send
+logging.warn(logger, "OTEL excluded", [])
+|> logging.event_not_otel
+|> logging.send
+```
+
+`with_otel`, `reset_otel`, and `is_otel_enabled` provide the programmatic
+forms. `set_otel_enabled`, `use_otel`, and `not_otel` return a logger carrying
+the updated default. A `Transport` is treated as OTEL when `otel` is `True` or
+its name is `"opentelemetry"`; regular transports are never suppressed.
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666

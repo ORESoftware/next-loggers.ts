@@ -29,6 +29,7 @@ log = Logger(
 )
 ```
 
+<<<<<<< HEAD
 ## OpenTelemetry on or off, per event
 
 `OpenTelemetryTransport` carries `otel = True`, so a single record can opt in or
@@ -56,3 +57,21 @@ flake8 --select NL1 src/          # NL100 diagnostics inline
 
 Files that never import next-loggers are skipped, so another library's
 `logger.info()` is never flagged; `--logger-name` adds your own names.
+=======
+## Per-event OpenTelemetry routing
+
+`otel=True` is the logger default. Set `otel=False` to make OTEL opt-in, then
+override individual events without suppressing Memory, Supabase, or other
+transports:
+
+```python
+log = Logger(otel=False, transports=[otel_transport, supabase_transport])
+log.info("sampled in").use_otel().send()
+log.warn("OTEL excluded").not_otel().send()
+log.info("computed").with_otel(route_to_otel).send()
+```
+
+`reset_otel()` returns an event to the logger default, while
+`is_otel_enabled(fallback)` exposes the resolved decision. Logger-level
+`set_otel_enabled()`, `use_otel()`, and `not_otel()` update the default.
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666

@@ -1,29 +1,14 @@
-//! Rust implementation of the language-neutral `next-loggers/v1` contract.
+//! Polyglot structured logging and explicit OpenTelemetry context adapters.
 
-use serde::{Deserialize, Serialize};
-pub use serde_json::{json, Map, Value};
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+#[path = "core.rs"]
+mod logger_core;
 
-pub const SCHEMA: &str = "next-loggers/v1";
-pub type JsonObject = Map<String, Value>;
+pub use logger_core::*;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum LogLevel {
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Fatal,
-}
+pub mod context;
+pub mod span;
 
+<<<<<<< HEAD
 impl LogLevel {
     fn index(self) -> u8 {
         match self {
@@ -846,3 +831,11 @@ impl Event {
         self.logger.emit(self, store)
     }
 }
+=======
+pub use context::{
+    apply_log_context, capture_log_context, current_log_context, enter_log_context,
+    merge_log_context, update_log_context, with_captured_log_context, with_log_context,
+    with_log_context_async, ContextFuture, LogContext, LogContextGuard,
+};
+pub use span::{with_span, with_span_async, Span, Tracer, OTEL_STATUS_ERROR, OTEL_STATUS_OK};
+>>>>>>> 0b2ae1c6cf9be0147ff386f3659a554c3853e666
