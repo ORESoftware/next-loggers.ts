@@ -52,6 +52,7 @@ coverage.out
 sdk/python/build/
 sdk/python/dist/
 sdk/rust/target/
+sdk/rust-context/target/
 sdk/wasm/target/
 sdk/gleam/build/
 *.log
@@ -71,3 +72,7 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+tmp
+temp
+tmp/worktrees
+temp/worktrees

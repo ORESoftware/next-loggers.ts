@@ -100,3 +100,24 @@ collect(Remaining, Values) ->
     after 1000 ->
         error(timeout)
     end.
+
+otel_routing_test() ->
+    Parent = self(),
+    Logger = next_loggers:new(
+        <<"checkout">>,
+        <<"erlang">>,
+        #{},
+        [
+            next_loggers:otel_transport(fun(Value) -> Parent ! {otel, Value} end),
+            next_loggers:supabase_transport(fun(Value) -> Parent ! {supabase, Value} end)
+        ]
+    ),
+    next_loggers:info(Logger, <<"default on">>, #{}),
+    next_loggers:warn(next_loggers:not_otel(Logger), <<"opted out">>, #{}),
+    next_loggers:log(next_loggers:not_otel(Logger), <<"ERROR">>, <<"opted back in">>, #{}, true),
+    ?assertEqual(<<"default on">>, receive {otel, First} -> maps:get(body, First) after 100 -> timeout end),
+    ?assertEqual(<<"opted back in">>, receive {otel, Second} -> maps:get(body, Second) after 100 -> timeout end),
+    ?assertEqual(timeout, receive {otel, _} -> unexpected after 50 -> timeout end),
+    Delivered = [receive {supabase, _} -> ok after 100 -> timeout end || _ <- lists:seq(1, 3)],
+    ?assertEqual([ok, ok, ok], Delivered),
+    ?assertEqual(true, next_loggers:otel_enabled(Logger)).

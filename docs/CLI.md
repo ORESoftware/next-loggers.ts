@@ -13,22 +13,28 @@ The TypeScript CLI remains dependency-free at runtime: [`src/cli/spec.ts`](../sr
 | `resolve` | Resolve the package export map for Node, Bun, Deno, browsers, edge-light, and workerd conditions. |
 | `pretty` | Render or filter `next-loggers/v1` NDJSON from standard input. |
 | `packages` | List every independently publishable Zed/native package, render its immutable tag, and optionally detect release-metadata drift. |
-| `lint` | Report standalone next-loggers event chains that never call `.send()`. |
+| `lint` | Report next-loggers events that are built but never sent (`NL100`), in JavaScript, TypeScript, Go, Rust, Python, and Gleam. |
 | `flags` | Print the command/flag/environment contract or compare `.cli-flags.toml` with the compiled specification. |
 
 Run `next-loggers --help` or `next-loggers <command> --help` for the complete generated option table.
 
-## Missing-send diagnostics
+## Missing-send linting
 
-`next-loggers lint [paths...]` recursively checks JavaScript and TypeScript source files for standalone event chains that never terminate with `.send()` or `.sendWithStore()`. By default it checks files importing `@oresoftware/next-loggers`; `--all` checks every supported source file, and repeatable `--logger-name` values add project-specific logger variables or property paths.
+`next-loggers lint [paths...]` (default `.`) reports level calls that never reach `send()`, the mistake that silently drops a log line. It complements the language-native tools rather than replacing them — the ESLint rule for JS/TS, `#[must_use]` for Rust, `sdk/go/cmd/nextloggerslint` for Go, and `next_loggers.lint` for Python — and is the only check available for Gleam, whose compiler has no must-use attribute.
 
-```sh
-next-loggers lint src test
-next-loggers lint --logger-name audit --logger-name request.log services
-NEXT_LOGGER_CLI_LINT_ALL=true next-loggers lint .
+```console
+$ next-loggers lint sdk src
+sdk/python/tests/test_conformance.py:69:9: next-loggers event is never sent; call send() so it reaches transports
+lint: 1 unsent event(s) in 113 checked file(s)
 ```
 
-Findings use the stable `NL100` code and return exit status 1. Unreadable or invalid paths return 2. The equivalent native analyzers are `go run github.com/ORESoftware/next-loggers.ts/sdk/go/cmd/nextloggerslint@latest ./...` and the Python `next-loggers-lint` console script / flake8 `NL1` extension.
+Findings use the stable `NL100` code. Exit code `0` when clean, `1` when anything is reported, `2` on an unreadable path. Equivalent native analyzers are `sdk/go/cmd/nextloggerslint` (`Send` / `SendWithStore`) and the Python `next-loggers-lint` console script / flake8 `NL1` extension.
+- Comments and string literals are blanked before matching, and `node_modules`, `dist`, `build`, `target`, `vendor`, `deps`, `_build`, and dot-directories are skipped.
+- Multi-line chains and Gleam `|>` pipelines are treated as one statement, so a `send` at the end of the chain counts.
+- Only a bare expression statement is reported. An event that is returned, assigned, awaited, or passed as an argument may be sent elsewhere, so it is left alone — the same rule the ESLint plugin applies.
+- Files with no reference to next-loggers are skipped so another library's `logger.info()` is never flagged; `--all` disables that filter and `--logger-name <name>` (repeatable) adds application-specific logger variables.
+
+Java, Ruby, Dart, Erlang, and Elixir are not scanned: those SDKs deliver at the call site instead of returning a deferred event, so there is no unsent state to detect.
 
 ## Release-package catalog
 
