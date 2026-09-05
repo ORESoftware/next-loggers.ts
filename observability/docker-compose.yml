@@ -60,7 +60,7 @@ services:
     mem_limit: 768m
 
   prometheus:
-    image: prom/prometheus:v3.13.1
+    image: prom/prometheus:v3.12.0
     init: true
     restart: unless-stopped
     command:
