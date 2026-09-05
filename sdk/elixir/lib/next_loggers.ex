@@ -46,7 +46,6 @@ defmodule ORESoftware.NextLoggers do
   end
 
   def info(logger, message, fields \\ %{}), do: log(logger, "INFO", message, fields)
-  def warn(logger, message, fields \\ %{}), do: log(logger, "WARN", message, fields)
   def error(logger, message, fields \\ %{}), do: log(logger, "ERROR", message, fields)
 
   @doc """

@@ -18,6 +18,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -59,6 +60,139 @@ func (values *stringList) Set(value string) error {
 		}
 	}
 	return nil
+}
+
+// lintFile is the unit-testable missing-send check used when logger names are explicit.
+func lintFile(path string, source []byte, loggerNames map[string]struct{}) ([]struct {
+	Path    string
+	Line    int
+	Column  int
+	Message string
+}, error) {
+	fileSet := token.NewFileSet()
+	tree, err := parser.ParseFile(fileSet, path, source, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, err
+	}
+	extras := make([]string, 0, len(loggerNames))
+	for name := range loggerNames {
+		extras = append(extras, name)
+	}
+	found, err := checkFile(fileSet, path, map[string]bool{}, extras)
+	if err != nil {
+		return nil, err
+	}
+	// checkFile skips files that do not import the SDK. Unit tests pass
+	// explicit logger names and source without that import.
+	if len(found) == 0 {
+		var methodsFindings []finding
+		ast.Inspect(tree, func(node ast.Node) bool {
+			statement, ok := node.(*ast.ExprStmt)
+			if !ok {
+				return true
+			}
+			var methods []string
+			root := callChain(statement.X, &methods)
+			if root == "" {
+				return true
+			}
+			if _, known := loggerNames[root]; !known {
+				if index := strings.LastIndex(root, "."); index >= 0 {
+					if _, knownField := loggerNames[root[index+1:]]; !knownField {
+						return true
+					}
+				} else {
+					return true
+				}
+			}
+			levelIndex := -1
+			for index, method := range methods {
+				if levelMethods[method] {
+					levelIndex = index
+					break
+				}
+			}
+			if levelIndex < 0 {
+				return true
+			}
+			for _, method := range methods[levelIndex+1:] {
+				if sendMethods[method] {
+					return true
+				}
+			}
+			position := fileSet.Position(statement.Pos())
+			methodsFindings = append(methodsFindings, finding{
+				position: position,
+				message:  "NL100 next-loggers event is never sent; call .Send() so it reaches transports",
+			})
+			return true
+		})
+		found = methodsFindings
+	}
+	out := make([]struct {
+		Path    string
+		Line    int
+		Column  int
+		Message string
+	}, 0, len(found))
+	for _, item := range found {
+		out = append(out, struct {
+			Path    string
+			Line    int
+			Column  int
+			Message string
+		}{Path: item.position.Filename, Line: item.position.Line, Column: item.position.Column, Message: item.message})
+	}
+	return out, nil
+}
+
+func run(arguments []string, stdout, stderr io.Writer) int {
+	var extraLoggers stringList
+	var extraImports stringList
+	flags := flag.NewFlagSet("nextloggerslint", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Var(&extraLoggers, "logger", "extra variable names holding a logger (comma separated)")
+	flags.Var(&extraLoggers, "logger-name", "extra variable or property path holding a next-loggers logger; repeatable")
+	flags.Var(&extraImports, "import", "extra next-loggers import paths (comma separated)")
+	if err := flags.Parse(arguments); err != nil {
+		return 2
+	}
+	targets := flags.Args()
+	if len(targets) == 0 {
+		targets = []string{"./..."}
+	}
+	imports := map[string]bool{defaultImportPath: true}
+	for _, value := range extraImports {
+		imports[value] = true
+	}
+	files, err := collect(targets)
+	if err != nil {
+		fmt.Fprintf(stderr, "nextloggerslint: %v\n", err)
+		return 2
+	}
+	fileSet := token.NewFileSet()
+	var findings []finding
+	for _, path := range files {
+		found, err := checkFile(fileSet, path, imports, extraLoggers)
+		if err != nil {
+			fmt.Fprintf(stderr, "nextloggerslint: %v\n", err)
+			return 2
+		}
+		findings = append(findings, found...)
+	}
+	sort.Slice(findings, func(first, second int) bool {
+		if findings[first].position.Filename != findings[second].position.Filename {
+			return findings[first].position.Filename < findings[second].position.Filename
+		}
+		return findings[first].position.Offset < findings[second].position.Offset
+	})
+	for _, item := range findings {
+		fmt.Fprintf(stdout, "%s: %s\n", item.position, item.message)
+	}
+	if len(findings) > 0 {
+		return 1
+	}
+	return 0
 }
 
 func main() {
@@ -238,7 +372,7 @@ func checkFile(
 		}
 		findings = append(findings, finding{
 			position: fileSet.Position(statement.Pos()),
-			message:  "next-loggers event is never sent; call .Send() so it reaches transports",
+			message:  "NL100 next-loggers event is never sent; call .Send() so it reaches transports",
 		})
 		return true
 	})

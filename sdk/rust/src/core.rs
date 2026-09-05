@@ -613,6 +613,7 @@ impl EventState {
     }
 }
 
+#[must_use = "a next-loggers event is only delivered when .send() is called"]
 #[derive(Clone)]
 pub struct Event {
     logger: Logger,

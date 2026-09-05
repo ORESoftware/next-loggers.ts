@@ -13,7 +13,7 @@ The TypeScript CLI remains dependency-free at runtime: [`src/cli/spec.ts`](../sr
 | `resolve` | Resolve the package export map for Node, Bun, Deno, browsers, edge-light, and workerd conditions. |
 | `pretty` | Render or filter `next-loggers/v1` NDJSON from standard input. |
 | `packages` | List every independently publishable Zed/native package, render its immutable tag, and optionally detect release-metadata drift. |
-| `lint` | Report next-loggers events that are built but never sent, in JavaScript, TypeScript, Go, Rust, Python, and Gleam. |
+| `lint` | Report next-loggers events that are built but never sent (`NL100`), in JavaScript, TypeScript, Go, Rust, Python, and Gleam. |
 | `flags` | Print the command/flag/environment contract or compare `.cli-flags.toml` with the compiled specification. |
 
 Run `next-loggers --help` or `next-loggers <command> --help` for the complete generated option table.
@@ -28,7 +28,7 @@ sdk/python/tests/test_conformance.py:69:9: next-loggers event is never sent; cal
 lint: 1 unsent event(s) in 113 checked file(s)
 ```
 
-- Exit code `0` when clean, `1` when anything is reported, `2` on an unreadable path.
+Findings use the stable `NL100` code. Exit code `0` when clean, `1` when anything is reported, `2` on an unreadable path. Equivalent native analyzers are `sdk/go/cmd/nextloggerslint` (`Send` / `SendWithStore`) and the Python `next-loggers-lint` console script / flake8 `NL1` extension.
 - Comments and string literals are blanked before matching, and `node_modules`, `dist`, `build`, `target`, `vendor`, `deps`, `_build`, and dot-directories are skipped.
 - Multi-line chains and Gleam `|>` pipelines are treated as one statement, so a `send` at the end of the chain counts.
 - Only a bare expression statement is reported. An event that is returned, assigned, awaited, or passed as an argument may be sent elsewhere, so it is left alone — the same rule the ESLint plugin applies.

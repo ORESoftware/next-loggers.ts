@@ -225,7 +225,7 @@ func TestPerEventOpenTelemetryRouting(t *testing.T) {
 		if regular.Records[index].Message != message {
 			t.Fatalf("regular transport missed %q: %#v", message, regular.Records)
 		}
-	}
+		}
 }
 
 func TestPerEventOtelRouting(t *testing.T) {
@@ -294,5 +294,5 @@ func TestPerEventOtelRouting(t *testing.T) {
 	}
 	if len(otel) != before+3 {
 		t.Fatalf("ResetOtel must fall back to the logger default: %#v", otel[before:])
-	}
+		}
 }

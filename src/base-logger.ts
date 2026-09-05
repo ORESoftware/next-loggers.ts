@@ -1446,7 +1446,6 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
     }
     return this.transports.filter((transport) => !this.isOtelTransport(transport));
   }
-
   anew(options: LoggerOptions = {}): BaseLogger<TEvent> {
     return new BaseLogger<TEvent>(
       {

@@ -1,4 +1,4 @@
-import { access, chmod, copyFile, cp, mkdir, readFile, rm } from 'node:fs/promises';
+import { access, chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -35,8 +35,27 @@ await cp(join(repositoryRoot, 'src'), join(targetRoot, 'src'), {
   errorOnExist: false,
 });
 for (const file of ['README.md', 'LICENSE', '.cli-flags.toml']) {
-  await copyFile(join(repositoryRoot, file), join(targetRoot, file));
+await copyFile(join(repositoryRoot, file), join(targetRoot, file));
 }
 await chmod(join(targetRoot, 'dist', 'cli', 'main.js'), 0o755);
+
+// Keep the publish-only package manifest's public surface exactly aligned with
+// the root package while retaining the SDK-local file list and repository
+// directory. Build metadata and development dependencies never belong in the
+// staged npm package.
+const { scripts: _scripts, devDependencies: _devDependencies, ...publishable } = rootPackage;
+await writeFile(
+  join(targetRoot, 'package.json'),
+  `${JSON.stringify(
+    {
+      ...publishable,
+      files: releasePackage.files,
+      repository: { ...rootPackage.repository, directory: 'sdk/nodejs' },
+    },
+    null,
+    2,
+  )}\n`,
+  'utf8',
+);
 
 console.log(`staged ${releasePackage.name}@${releasePackage.version} in sdk/nodejs`);

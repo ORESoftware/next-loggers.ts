@@ -14,9 +14,7 @@
     is_otel_enabled/2,
     set_otel_enabled/2,
     log/4,
-    log/5,
     info/3,
-    warn/3,
     error/3,
     otel_enabled/1,
     otel_transport/1,
@@ -57,9 +55,6 @@ with_context(Context, Fun) when is_map(Context), is_function(Fun, 0) ->
 
 info(Logger, Message, Fields) ->
     log(Logger, <<"INFO">>, Message, Fields).
-
-warn(Logger, Message, Fields) ->
-    log(Logger, <<"WARN">>, Message, Fields).
 
 error(Logger, Message, Fields) ->
     log(Logger, <<"ERROR">>, Message, Fields).
