@@ -29,13 +29,14 @@ fn scoped_and_future_context_do_not_leak() {
         trace_id: Some("trace-1".into()),
         ..LogContext::default()
     };
+    let normalized_context = context.clone().normalized();
 
     let logger = Logger::new(Options {
         console: false,
         ..Options::default()
     });
     let record = with_log_context(context.clone(), || {
-        assert_eq!(current_log_context(), context.clone());
+        assert_eq!(current_log_context(), normalized_context.clone());
         logger
             .info_context(vec![json!("hello")])
             .to_record()
@@ -45,7 +46,7 @@ fn scoped_and_future_context_do_not_leak() {
     assert_eq!(record.trace_id.as_deref(), Some("trace-1"));
     assert_eq!(record.logged_in_user.expect("user")["id"], json!("u1"));
 
-    let future_context = context.clone();
+    let future_context = normalized_context;
     let mut future = Box::pin(with_log_context_async(context, async move {
         current_log_context()
     }));
