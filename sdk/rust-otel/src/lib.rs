@@ -86,7 +86,10 @@ pub fn with_context<T>(context: TraceContext, callback: impl FnOnce() -> T) -> T
 pub fn apply_context(event: Event, context: &TraceContext) -> Event {
     let mut fields = context.fields.clone();
     if !context.span_id.is_empty() {
-        fields.insert("otel.span_id".into(), Value::String(context.span_id.clone()));
+        fields.insert(
+            "otel.span_id".into(),
+            Value::String(context.span_id.clone()),
+        );
     }
     fields.insert("otel.trace_flags".into(), json!(context.trace_flags));
     if !context.trace_state.is_empty() {
@@ -179,25 +182,24 @@ pub fn with_span<T>(
     attributes: JsonObject,
     callback: impl FnOnce(&mut dyn Span) -> Result<T, LoggerError>,
 ) -> Result<T, LoggerError> {
-    let mut span: Box<dyn Span> = match catch_unwind(AssertUnwindSafe(|| {
-        tracer.start(name, &attributes)
-    })) {
-        Ok(Ok(span)) => span,
-        Ok(Err(error)) => {
-            report_bridge_failure(logger, &TraceContext::default(), name, "start span", &error);
-            Box::<NoopSpan>::default()
-        }
-        Err(payload) => {
-            report_bridge_failure(
-                logger,
-                &TraceContext::default(),
-                name,
-                "start span",
-                &panic_text(payload.as_ref()),
-            );
-            Box::<NoopSpan>::default()
-        }
-    };
+    let mut span: Box<dyn Span> =
+        match catch_unwind(AssertUnwindSafe(|| tracer.start(name, &attributes))) {
+            Ok(Ok(span)) => span,
+            Ok(Err(error)) => {
+                report_bridge_failure(logger, &TraceContext::default(), name, "start span", &error);
+                Box::<NoopSpan>::default()
+            }
+            Err(payload) => {
+                report_bridge_failure(
+                    logger,
+                    &TraceContext::default(),
+                    name,
+                    "start span",
+                    &panic_text(payload.as_ref()),
+                );
+                Box::<NoopSpan>::default()
+            }
+        };
 
     let context = match catch_unwind(AssertUnwindSafe(|| span.context())) {
         Ok(context) => context,
@@ -278,14 +280,9 @@ pub fn with_span<T>(
                     );
                 }
             }
-            invoke_span_safely(
-                logger,
-                &context,
-                name,
-                "end span",
-                span.as_mut(),
-                |span| span.end(),
-            );
+            invoke_span_safely(logger, &context, name, "end span", span.as_mut(), |span| {
+                span.end()
+            });
             result
         }
         Err(payload) => {
@@ -319,14 +316,9 @@ pub fn with_span<T>(
                     ))
                     .add_tags(["otel-span"]),
             );
-            invoke_span_safely(
-                logger,
-                &context,
-                name,
-                "end span",
-                span.as_mut(),
-                |span| span.end(),
-            );
+            invoke_span_safely(logger, &context, name, "end span", span.as_mut(), |span| {
+                span.end()
+            });
             resume_unwind(payload)
         }
     }
@@ -341,7 +333,13 @@ fn invoke_span_safely(
     callback: impl FnOnce(&mut dyn Span),
 ) {
     if let Err(payload) = catch_unwind(AssertUnwindSafe(|| callback(span))) {
-        report_bridge_failure(logger, context, name, operation, &panic_text(payload.as_ref()));
+        report_bridge_failure(
+            logger,
+            context,
+            name,
+            operation,
+            &panic_text(payload.as_ref()),
+        );
     }
 }
 
