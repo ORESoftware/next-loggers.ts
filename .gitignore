@@ -71,8 +71,8 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
-tmp
-temp
-tmp/worktrees
-temp/worktrees
+tmp/
+temp/
+tmp/worktrees/
+temp/worktrees/
 sdk/rust-context/target/
