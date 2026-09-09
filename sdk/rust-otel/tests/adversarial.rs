@@ -332,12 +332,12 @@ fn explicit_context_methods_cover_all_log_levels() {
         ..TraceContext::default()
     };
     let events = [
-        logger.trace_context(&context, vec![json!("trace")]),
-        logger.debug_context(&context, vec![json!("debug")]),
-        logger.info_context(&context, vec![json!("info")]),
-        logger.warn_context(&context, vec![json!("warn")]),
-        logger.error_context(&context, vec![json!("error")]),
-        logger.fatal_context(&context, vec![json!("fatal")]),
+        LoggerContextExt::trace_context(&logger, &context, vec![json!("trace")]),
+        LoggerContextExt::debug_context(&logger, &context, vec![json!("debug")]),
+        LoggerContextExt::info_context(&logger, &context, vec![json!("info")]),
+        LoggerContextExt::warn_context(&logger, &context, vec![json!("warn")]),
+        LoggerContextExt::error_context(&logger, &context, vec![json!("error")]),
+        LoggerContextExt::fatal_context(&logger, &context, vec![json!("fatal")]),
     ];
     for event in events {
         event.send().unwrap();
