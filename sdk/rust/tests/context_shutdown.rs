@@ -49,10 +49,7 @@ fn scoped_and_future_context_do_not_leak() {
     let mut future = Box::pin(with_log_context_async(context, async move {
         current_log_context()
     }));
-    assert_eq!(
-        poll_once(future.as_mut()),
-        Poll::Ready(future_context)
-    );
+    assert_eq!(poll_once(future.as_mut()), Poll::Ready(future_context));
     assert_eq!(current_log_context(), LogContext::default());
 }
 
