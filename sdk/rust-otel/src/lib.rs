@@ -86,7 +86,10 @@ pub fn with_context<T>(context: TraceContext, callback: impl FnOnce() -> T) -> T
 pub fn apply_context(event: Event, context: &TraceContext) -> Event {
     let mut fields = context.fields.clone();
     if !context.span_id.is_empty() {
-        fields.insert("otel.span_id".into(), Value::String(context.span_id.clone()));
+        fields.insert(
+            "otel.span_id".into(),
+            Value::String(context.span_id.clone()),
+        );
     }
     fields.insert("otel.trace_flags".into(), json!(context.trace_flags));
     if !context.trace_state.is_empty() {
@@ -179,25 +182,24 @@ pub fn with_span<T>(
     attributes: JsonObject,
     callback: impl FnOnce(&mut dyn Span) -> Result<T, LoggerError>,
 ) -> Result<T, LoggerError> {
-    let mut span: Box<dyn Span> = match catch_unwind(AssertUnwindSafe(|| {
-        tracer.start(name, &attributes)
-    })) {
-        Ok(Ok(span)) => span,
-        Ok(Err(error)) => {
-            report_bridge_failure(logger, &TraceContext::default(), name, "start span", &error);
-            Box::<NoopSpan>::default()
-        }
-        Err(payload) => {
-            report_bridge_failure(
-                logger,
-                &TraceContext::default(),
-                name,
-                "start span",
-                &panic_text(payload.as_ref()),
-            );
-            Box::<NoopSpan>::default()
-        }
-    };
+    let mut span: Box<dyn Span> =
+        match catch_unwind(AssertUnwindSafe(|| tracer.start(name, &attributes))) {
+            Ok(Ok(span)) => span,
+            Ok(Err(error)) => {
+                report_bridge_failure(logger, &TraceContext::default(), name, "start span", &error);
+                Box::<NoopSpan>::default()
+            }
+            Err(payload) => {
+                report_bridge_failure(
+                    logger,
+                    &TraceContext::default(),
+                    name,
+                    "start span",
+                    &panic_text(payload.as_ref()),
+                );
+                Box::<NoopSpan>::default()
+            }
+        };
 
     let context = match catch_unwind(AssertUnwindSafe(|| span.context())) {
         Ok(context) => context,
@@ -215,10 +217,13 @@ pub fn with_span<T>(
     let started = Instant::now();
     let _scope = ContextScope::enter(context.clone());
     send_safely(
-        logger
-            .debug_context(&context, vec![json!("span started:"), json!(name)])
-            .add_fields(span_fields(name, "start", None))
-            .add_tags(["otel-span"]),
+        LoggerContextExt::debug_context(
+            logger,
+            &context,
+            vec![json!("span started:"), json!(name)],
+        )
+        .add_fields(span_fields(name, "start", None))
+        .add_tags(["otel-span"]),
     );
 
     let callback_result = catch_unwind(AssertUnwindSafe(|| callback(span.as_mut())));
@@ -235,14 +240,17 @@ pub fn with_span<T>(
                         |span| span.set_status(1, ""),
                     );
                     send_safely(
-                        logger
-                            .debug_context(&context, vec![json!("span completed:"), json!(name)])
-                            .add_fields(span_fields(
-                                name,
-                                "end",
-                                Some(started.elapsed().as_secs_f64() * 1000.0),
-                            ))
-                            .add_tags(["otel-span"]),
+                        LoggerContextExt::debug_context(
+                            logger,
+                            &context,
+                            vec![json!("span completed:"), json!(name)],
+                        )
+                        .add_fields(span_fields(
+                            name,
+                            "end",
+                            Some(started.elapsed().as_secs_f64() * 1000.0),
+                        ))
+                        .add_tags(["otel-span"]),
                     );
                 }
                 Err(error) => {
@@ -264,28 +272,23 @@ pub fn with_span<T>(
                         |span| span.set_status(2, &description),
                     );
                     send_safely(
-                        logger
-                            .error_context(
-                                &context,
-                                vec![json!("span failed:"), json!(name), json!(description)],
-                            )
-                            .add_fields(span_fields(
-                                name,
-                                "error",
-                                Some(started.elapsed().as_secs_f64() * 1000.0),
-                            ))
-                            .add_tags(["otel-span"]),
+                        LoggerContextExt::error_context(
+                            logger,
+                            &context,
+                            vec![json!("span failed:"), json!(name), json!(description)],
+                        )
+                        .add_fields(span_fields(
+                            name,
+                            "error",
+                            Some(started.elapsed().as_secs_f64() * 1000.0),
+                        ))
+                        .add_tags(["otel-span"]),
                     );
                 }
             }
-            invoke_span_safely(
-                logger,
-                &context,
-                name,
-                "end span",
-                span.as_mut(),
-                |span| span.end(),
-            );
+            invoke_span_safely(logger, &context, name, "end span", span.as_mut(), |span| {
+                span.end()
+            });
             result
         }
         Err(payload) => {
@@ -307,26 +310,21 @@ pub fn with_span<T>(
                 |span| span.set_status(2, &description),
             );
             send_safely(
-                logger
-                    .error_context(
-                        &context,
-                        vec![json!("span panicked:"), json!(name), json!(description)],
-                    )
-                    .add_fields(span_fields(
-                        name,
-                        "panic",
-                        Some(started.elapsed().as_secs_f64() * 1000.0),
-                    ))
-                    .add_tags(["otel-span"]),
+                LoggerContextExt::error_context(
+                    logger,
+                    &context,
+                    vec![json!("span panicked:"), json!(name), json!(description)],
+                )
+                .add_fields(span_fields(
+                    name,
+                    "panic",
+                    Some(started.elapsed().as_secs_f64() * 1000.0),
+                ))
+                .add_tags(["otel-span"]),
             );
-            invoke_span_safely(
-                logger,
-                &context,
-                name,
-                "end span",
-                span.as_mut(),
-                |span| span.end(),
-            );
+            invoke_span_safely(logger, &context, name, "end span", span.as_mut(), |span| {
+                span.end()
+            });
             resume_unwind(payload)
         }
     }
@@ -341,7 +339,13 @@ fn invoke_span_safely(
     callback: impl FnOnce(&mut dyn Span),
 ) {
     if let Err(payload) = catch_unwind(AssertUnwindSafe(|| callback(span))) {
-        report_bridge_failure(logger, context, name, operation, &panic_text(payload.as_ref()));
+        report_bridge_failure(
+            logger,
+            context,
+            name,
+            operation,
+            &panic_text(payload.as_ref()),
+        );
     }
 }
 
@@ -356,18 +360,18 @@ fn report_bridge_failure(
     fields.insert("otel.bridge_operation".into(), json!(operation));
     fields.insert("otel.span_name".into(), json!(name));
     send_safely(
-        logger
-            .warn_context(
-                context,
-                vec![
-                    json!("OpenTelemetry"),
-                    json!(operation),
-                    json!("failed:"),
-                    json!(error.to_string()),
-                ],
-            )
-            .add_fields(fields)
-            .add_tags(["otel-span", "otel-bridge-error"]),
+        LoggerContextExt::warn_context(
+            logger,
+            context,
+            vec![
+                json!("OpenTelemetry"),
+                json!(operation),
+                json!("failed:"),
+                json!(error.to_string()),
+            ],
+        )
+        .add_fields(fields)
+        .add_tags(["otel-span", "otel-bridge-error"]),
     );
 }
 

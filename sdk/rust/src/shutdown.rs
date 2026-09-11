@@ -76,13 +76,15 @@ pub struct ShutdownEvent {
 
 pub type ShutdownObserver = Arc<dyn Fn(&ShutdownEvent) + Send + Sync + 'static>;
 
-
 /// Creates a structured next-loggers observer. If the logger has an injected
 /// OpenTelemetry transport, the same lifecycle records are exported there.
 pub fn logger_shutdown_observer(logger: Logger) -> ShutdownObserver {
     Arc::new(move |event: &ShutdownEvent| {
         let mut fields = JsonObject::new();
-        fields.insert("shutdown.phase".into(), Value::String(event.phase.to_string()));
+        fields.insert(
+            "shutdown.phase".into(),
+            Value::String(event.phase.to_string()),
+        );
         fields.insert(
             "shutdown.previous_phase".into(),
             Value::String(event.previous_phase.to_string()),
@@ -91,7 +93,10 @@ pub fn logger_shutdown_observer(logger: Logger) -> ShutdownObserver {
             "shutdown.trigger".into(),
             Value::String(event.trigger.to_string()),
         );
-        fields.insert("shutdown.interactive".into(), Value::Bool(event.interactive));
+        fields.insert(
+            "shutdown.interactive".into(),
+            Value::Bool(event.interactive),
+        );
         fields.insert("shutdown.attempt".into(), Value::from(event.attempt as u64));
         fields.insert(
             "shutdown.elapsed_ms".into(),
@@ -162,9 +167,7 @@ impl ShutdownCoordinator {
             let (next, decision) = match previous {
                 ShutdownPhase::Running => (ShutdownPhase::Draining, ShutdownDecision::Drain),
                 ShutdownPhase::Draining => (ShutdownPhase::Forcing, ShutdownDecision::Force),
-                ShutdownPhase::Forcing | ShutdownPhase::Stopped => {
-                    return ShutdownDecision::Ignore
-                }
+                ShutdownPhase::Forcing | ShutdownPhase::Stopped => return ShutdownDecision::Ignore,
             };
             if self
                 .phase
@@ -188,9 +191,7 @@ impl ShutdownCoordinator {
         loop {
             let previous = self.phase();
             match previous {
-                ShutdownPhase::Forcing | ShutdownPhase::Stopped => {
-                    return ShutdownDecision::Ignore
-                }
+                ShutdownPhase::Forcing | ShutdownPhase::Stopped => return ShutdownDecision::Ignore,
                 ShutdownPhase::Running | ShutdownPhase::Draining => {
                     if self
                         .phase
@@ -245,18 +246,14 @@ impl ShutdownCoordinator {
         &self,
         previous_phase: ShutdownPhase,
         phase: ShutdownPhase,
-        trigger: ShutdownTriggger,
+        trigger: ShutdownTrigger,
         interactive: bool,
         attempt: usize,
         error: Option<String>,
-   ) {
+    ) {
         let message = match phase {
-            ShutdownPhase::Draining => {
-                "graceful shutdown started; no new work will be accepted"
-            }
-            ShutdownPhase::Forcing => {
-                "forced shutdown started; remaining work will be terminated"
-            }
+            ShutdownPhase::Draining => "graceful shutdown started; no new work will be accepted",
+            ShutdownPhase::Forcing => "forced shutdown started; remaining work will be terminated",
             ShutdownPhase::Stopped => "shutdown complete",
             ShutdownPhase::Running => "shutdown coordinator running",
         }

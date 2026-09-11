@@ -1,9 +1,9 @@
 //! Polyglot structured logging and explicit OpenTelemetry context adapters.
 
 #[path = "core.rs"]
-mod logger_core;
+mod core_impl;
 
-pub use logger_core::*;
+pub use core_impl::*;
 
 pub mod context;
 pub mod span;

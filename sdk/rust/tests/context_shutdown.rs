@@ -1,11 +1,10 @@
-use next_loggers::context::{
-    capture_log_context, contextualize_future, current_log_context, with_log_context, LogContext,
-    LoggerContextExt,
-};
 use next_loggers::shutdown::{
     ShutdownCoordinator, ShutdownDecision, ShutdownPhase, ShutdownTrigger,
 };
-use next_loggers::{json, JsonObject, Logger, Options};
+use next_loggers::{
+    current_log_context, json, with_log_context, with_log_context_async, JsonObject, LogContext,
+    Logger, Options,
+};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -30,28 +29,29 @@ fn scoped_and_future_context_do_not_leak() {
         trace_id: Some("trace-1".into()),
         ..LogContext::default()
     };
+    let normalized_context = context.clone().normalized();
 
     let logger = Logger::new(Options {
         console: false,
         ..Options::default()
     });
     let record = with_log_context(context.clone(), || {
-        assert_eq!(capture_log_context(), Some(context.clone()));
+        assert_eq!(current_log_context(), normalized_context.clone());
         logger
             .info_context(vec![json!("hello")])
             .to_record()
             .expect("record")
     });
-    assert!(current_log_context().is_none());
+    assert_eq!(current_log_context(), LogContext::default());
     assert_eq!(record.trace_id.as_deref(), Some("trace-1"));
     assert_eq!(record.logged_in_user.expect("user")["id"], json!("u1"));
 
-    let future_context = context.clone();
-    let mut future = Box::pin(contextualize_future(context, async move {
+    let future_context = normalized_context;
+    let mut future = Box::pin(with_log_context_async(context, async move {
         current_log_context()
     }));
-    assert_eq!(poll_once(future.as_mut()), Poll::Ready(Some(future_context)));
-    assert!(current_log_context().is_none());
+    assert_eq!(poll_once(future.as_mut()), Poll::Ready(future_context));
+    assert_eq!(current_log_context(), LogContext::default());
 }
 
 #[test]

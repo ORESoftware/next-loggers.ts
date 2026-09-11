@@ -20,8 +20,7 @@ fn thread_local_context_is_scoped_and_explicit_context_reaches_records() {
     };
     with_context(context.clone(), || {
         assert_eq!(current_context(), Some(context.clone()));
-        logger
-            .info_context(&context, vec![json!("inside")])
+        LoggerContextExt::info_context(&logger, &context, vec![json!("inside")])
             .send()
             .unwrap();
     });
