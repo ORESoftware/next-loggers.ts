@@ -231,16 +231,18 @@ fn per_event_otel_routing_skips_only_otel_transports() {
     let emitted: Arc<Mutex<Vec<OpenTelemetryLogRecord>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = emitted.clone();
     let memory = Arc::new(MemoryTransport::default());
-    let mut options = Options::default();
-    options.app_name = "checkout".into();
-    options.console = false;
-    options.transports = vec![
-        Arc::new(OpenTelemetryTransport::new(move |record| {
-            sink.lock().expect("sink poisoned").push(record);
-            Ok(())
-        })) as Arc<dyn Transport>,
-        memory.clone() as Arc<dyn Transport>,
-    ];
+    let options = Options {
+        app_name: "checkout".into(),
+        console: false,
+        transports: vec![
+            Arc::new(OpenTelemetryTransport::new(move |record| {
+                sink.lock().expect("sink poisoned").push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+            memory.clone() as Arc<dyn Transport>,
+        ],
+        ..Options::default()
+    };
     let logger = Logger::new(options);
 
     logger.info(vec![json!("default on")]).send().expect("sent");
@@ -267,14 +269,16 @@ fn per_event_otel_routing_skips_only_otel_transports() {
     // otel: false makes OpenTelemetry opt-in per event.
     let opted: Arc<Mutex<Vec<OpenTelemetryLogRecord>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = opted.clone();
-    let mut options = Options::default();
-    options.app_name = "checkout".into();
-    options.console = false;
-    options.otel = false;
-    options.transports = vec![Arc::new(OpenTelemetryTransport::new(move |record| {
-        sink.lock().expect("sink poisoned").push(record);
-        Ok(())
-    })) as Arc<dyn Transport>];
+    let options = Options {
+        app_name: "checkout".into(),
+        console: false,
+        otel: false,
+        transports: vec![Arc::new(OpenTelemetryTransport::new(move |record| {
+            sink.lock().expect("sink poisoned").push(record);
+            Ok(())
+        })) as Arc<dyn Transport>],
+        ..Options::default()
+    };
     let logger = Logger::new(options);
 
     logger.info(vec![json!("skipped")]).send().expect("sent");
