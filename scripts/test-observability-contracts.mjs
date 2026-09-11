@@ -203,7 +203,7 @@ expectMatch(
 );
 expectMatch(
   prometheus,
-  /Unknown Prometheus labels/,
+  /unexpected Prometheus labels/,
   'Prometheus label-schema validation is missing',
 );
 expectNoMatch(
