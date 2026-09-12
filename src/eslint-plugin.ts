@@ -2,16 +2,19 @@ import type { ESLint, Linter, Rule } from 'eslint';
 
 type AstNode = Rule.Node & {
   argument?: Rule.Node;
+  arguments?: Rule.Node[];
   callee?: Rule.Node;
   computed?: boolean;
   expression?: Rule.Node;
   id?: Rule.Node;
   imported?: Rule.Node & { name?: string; value?: unknown };
   init?: Rule.Node | null;
+  key?: Rule.Node & { name?: string; value?: unknown };
   left?: Rule.Node;
   local?: Rule.Node & { name?: string };
   name?: string;
   object?: Rule.Node;
+  properties?: Rule.Node[];
   property?: Rule.Node & { name?: string; value?: unknown };
   right?: Rule.Node;
   source?: { value?: unknown };
@@ -148,6 +151,17 @@ function isNextLoggersModule(source: unknown, moduleNames: Set<string>): source 
   return false;
 }
 
+function literalString(node: Rule.Node | null | undefined): string | undefined {
+  const current = unwrap(node);
+  if (!current) {
+    return undefined;
+  }
+  if (current.type === 'Literal' && typeof current.value === 'string') {
+    return current.value;
+  }
+  return undefined;
+}
+
 interface LoggerTrackingState {
   knownLoggers: Set<string>;
   knownFactories: Set<string>;
@@ -166,6 +180,36 @@ function createLoggerTrackingState(
   const knownFactories = new Set<string>();
   const knownClasses = new Set<string>();
   const moduleNames = new Set(['@oresoftware/next-loggers', ...(options.moduleNames || [])]);
+
+  const registerExport = (exportedName: string, localName: string): void => {
+    if (exportedName === 'default' || LOGGER_EXPORTS.has(exportedName)) {
+      knownLoggers.add(localName);
+    }
+    if (FACTORY_EXPORTS.has(exportedName)) {
+      knownFactories.add(localName);
+    }
+    if (CLASS_EXPORTS.has(exportedName)) {
+      knownClasses.add(localName);
+    }
+  };
+
+  const registerNamespace = (localName: string): void => {
+    for (const name of LOGGER_EXPORTS) knownLoggers.add(`${localName}.${name}`);
+    for (const name of FACTORY_EXPORTS) knownFactories.add(`${localName}.${name}`);
+    for (const name of CLASS_EXPORTS) knownClasses.add(`${localName}.${name}`);
+  };
+
+  const requireModuleName = (node: Rule.Node | null | undefined): string | undefined => {
+    const current = unwrap(node);
+    if (!current || !hasType(current, 'CallExpression', 'OptionalCallExpression')) {
+      return undefined;
+    }
+    if (getQualifiedName(current.callee) !== 'require') {
+      return undefined;
+    }
+    const source = literalString(current.arguments?.[0]);
+    return source && isNextLoggersModule(source, moduleNames) ? source : undefined;
+  };
 
   const state: LoggerTrackingState = {
     knownLoggers,
@@ -215,23 +259,47 @@ function createLoggerTrackingState(
           continue;
         }
         if (specifier.type === 'ImportNamespaceSpecifier') {
-          for (const name of LOGGER_EXPORTS) knownLoggers.add(`${localName}.${name}`);
-          for (const name of FACTORY_EXPORTS) knownFactories.add(`${localName}.${name}`);
-          for (const name of CLASS_EXPORTS) knownClasses.add(`${localName}.${name}`);
+          registerNamespace(localName);
           continue;
         }
         const importedName = specifier.imported?.name || specifier.imported?.value;
-        if (typeof importedName !== 'string') {
-          continue;
+        if (typeof importedName === 'string') {
+          registerExport(importedName, localName);
         }
-        if (LOGGER_EXPORTS.has(importedName)) knownLoggers.add(localName);
-        if (FACTORY_EXPORTS.has(importedName)) knownFactories.add(localName);
-        if (CLASS_EXPORTS.has(importedName)) knownClasses.add(localName);
       }
     },
     variableDeclarator(node: Rule.Node): void {
       const declaration = node as AstNode;
       const identifier = declaration.id as AstNode | undefined;
+
+      if (requireModuleName(declaration.init)) {
+        if (identifier?.type === 'Identifier' && identifier.name) {
+          registerNamespace(identifier.name);
+          return;
+        }
+        if (identifier?.type === 'ObjectPattern') {
+          for (const rawProperty of identifier.properties || []) {
+            const property = rawProperty as AstNode;
+            if (property.type !== 'Property') {
+              continue;
+            }
+            const key = property.key as AstNode | undefined;
+            const value = property.value as AstNode | undefined;
+            const exportedName =
+              key?.type === 'Identifier'
+                ? key.name
+                : key?.type === 'Literal' && typeof key.value === 'string'
+                  ? key.value
+                  : undefined;
+            const localName = value?.type === 'Identifier' ? value.name : undefined;
+            if (exportedName && localName) {
+              registerExport(exportedName, localName);
+            }
+          }
+          return;
+        }
+      }
+
       if (identifier?.type === 'Identifier' && identifier.name && state.isLoggerProducer(declaration.init)) {
         knownLoggers.add(identifier.name);
       }
