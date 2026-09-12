@@ -14,8 +14,13 @@
     is_otel_enabled/2,
     set_otel_enabled/2,
     log/4,
+    log/5,
+    trace/3,
+    debug/3,
     info/3,
+    warn/3,
     error/3,
+    fatal/3,
     otel_enabled/1,
     otel_transport/1,
     supabase_transport/1
@@ -53,11 +58,23 @@ with_context(Context, Fun) when is_map(Context), is_function(Fun, 0) ->
         end
     end.
 
+trace(Logger, Message, Fields) ->
+    log(Logger, <<"TRACE">>, Message, Fields).
+
+debug(Logger, Message, Fields) ->
+    log(Logger, <<"DEBUG">>, Message, Fields).
+
 info(Logger, Message, Fields) ->
     log(Logger, <<"INFO">>, Message, Fields).
 
+warn(Logger, Message, Fields) ->
+    log(Logger, <<"WARN">>, Message, Fields).
+
 error(Logger, Message, Fields) ->
     log(Logger, <<"ERROR">>, Message, Fields).
+
+fatal(Logger, Message, Fields) ->
+    log(Logger, <<"FATAL">>, Message, Fields).
 
 log(Logger, Level, Message, EventFields)
         when is_map(Logger), is_binary(Level), is_binary(Message), is_map(EventFields) ->
