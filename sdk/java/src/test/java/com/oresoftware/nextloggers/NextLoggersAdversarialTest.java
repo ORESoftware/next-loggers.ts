@@ -41,12 +41,18 @@ public final class NextLoggersAdversarialTest {
     assert NextLoggers.currentContext() == null;
     NextLoggers.TraceContext parent = new NextLoggers.TraceContext("parent", "span-parent", 1);
     NextLoggers.TraceContext child = new NextLoggers.TraceContext("child", "span-child", 1);
-    try (NextLoggers.Scope ignored = NextLoggers.withContext(parent)) {
+    NextLoggers.Scope parentScope = NextLoggers.withContext(parent);
+    try {
       assert NextLoggers.currentContext().traceId().equals("parent");
-      try (NextLoggers.Scope ignoredChild = NextLoggers.withContext(child)) {
+      NextLoggers.Scope childScope = NextLoggers.withContext(child);
+      try {
         assert NextLoggers.currentContext().traceId().equals("child");
+      } finally {
+        childScope.close();
       }
       assert NextLoggers.currentContext().traceId().equals("parent");
+    } finally {
+      parentScope.close();
     }
     assert NextLoggers.currentContext() == null;
   }
@@ -94,9 +100,12 @@ public final class NextLoggersAdversarialTest {
   private static void explicitTraceRemainsPrimary() {
     NextLoggers.MemoryTransport memory = new NextLoggers.MemoryTransport();
     NextLoggers.Logger logger = logger(NextLoggers.Level.TRACE, List.of(memory));
-    try (NextLoggers.Scope ignored = NextLoggers.withContext(
-        new NextLoggers.TraceContext("ambient", "ambient-span", 1))) {
+    NextLoggers.Scope scope = NextLoggers.withContext(
+        new NextLoggers.TraceContext("ambient", "ambient-span", 1));
+    try {
       logger.info("inside").addTrace("explicit").send();
+    } finally {
+      scope.close();
     }
     NextLoggers.LogRecord record = memory.records().get(0);
     assert record.traceId().equals("explicit");
@@ -162,11 +171,14 @@ public final class NextLoggersAdversarialTest {
       final int value = index;
       Thread thread = new Thread(() -> {
         String trace = "trace-" + value;
-        try (NextLoggers.Scope ignored = NextLoggers.withContext(
-            new NextLoggers.TraceContext(trace, "span-" + value, 1))) {
+        NextLoggers.Scope scope = NextLoggers.withContext(
+            new NextLoggers.TraceContext(trace, "span-" + value, 1));
+        try {
           ready.countDown();
           await(start);
           logger.info("message-" + value).send();
+        } finally {
+          scope.close();
         }
       });
       thread.start();
