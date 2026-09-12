@@ -227,7 +227,10 @@ fn add_users(
   }
 }
 
-fn add_traces(event: logging.LogEvent, traces: List(String)) -> logging.LogEvent {
+fn add_traces(
+  event: logging.LogEvent,
+  traces: List(String),
+) -> logging.LogEvent {
   case traces {
     [] -> event
     [first, ..rest] -> add_traces(logging.add_trace(event, first), rest)
@@ -274,14 +277,20 @@ fn merge_optional_fields(
   }
 }
 
-fn append_optional_string(values: List(String), value: Option(String)) -> List(String) {
+fn append_optional_string(
+  values: List(String),
+  value: Option(String),
+) -> List(String) {
   case value {
     Some(value) -> append_unique_strings(values, [value])
     None -> values
   }
 }
 
-fn append_unique_strings(base: List(String), patch: List(String)) -> List(String) {
+fn append_unique_strings(
+  base: List(String),
+  patch: List(String),
+) -> List(String) {
   case patch {
     [] -> base
     [first, ..rest] -> {
@@ -315,7 +324,10 @@ fn replace_field(
     [#(current_key, current_value), ..rest] ->
       case current_key == key {
         True -> [#(key, value), ..rest]
-        False -> [#(current_key, current_value), ..replace_field(rest, key, value)]
+        False -> [
+          #(current_key, current_value),
+          ..replace_field(rest, key, value)
+        ]
       }
   }
 }
@@ -323,10 +335,11 @@ fn replace_field(
 fn string_member(values: List(String), needle: String) -> Bool {
   case values {
     [] -> False
-    [first, ..rest] -> case first == needle {
-      True -> True
-      False -> string_member(rest, needle)
-    }
+    [first, ..rest] ->
+      case first == needle {
+        True -> True
+        False -> string_member(rest, needle)
+      }
   }
 }
 
