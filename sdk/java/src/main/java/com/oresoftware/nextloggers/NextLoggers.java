@@ -56,7 +56,7 @@ public final class NextLoggers {
     Objects.requireNonNull(context, "context");
     Deque<TraceContext> stack = CONTEXT.get();
     stack.push(context);
-    return new Scope(Thread.currentThread().threadId(), stack);
+    return new Scope(Thread.currentThread().getId(), stack);
   }
 
   public static TraceContext currentContext() {
@@ -77,7 +77,7 @@ public final class NextLoggers {
     @Override
     public void close() {
       if (closed) return;
-      if (Thread.currentThread().threadId() != threadId) {
+      if (Thread.currentThread().getId() != threadId) {
         throw new IllegalStateException("next-loggers context scope closed on a different thread");
       }
       if (stack.isEmpty()) {
