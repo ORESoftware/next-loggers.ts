@@ -25,11 +25,17 @@ jobs:
           // API conformance tests deliberately exercise arbitrary trace IDs. This
           // fleet rule applies to implementation call-site markers, not fixtures
           // that verify the logger still accepts dynamic/runtime trace context.
+          // The ESLint rule implementation itself also contains method-name
+          // literals such as '.addTraceId(' and is validated by its AST tests.
           const ignored = /(^|\/)(node_modules|dist|build|coverage|vendor|generated|tests|\.r2g)(\/|$)/;
           const files = cp.execFileSync('git', ['ls-files'], { encoding: 'utf8' })
             .split(/\r?\n/)
             .filter(Boolean)
-            .filter((file) => sourceExts.has(path.extname(file)) && !ignored.test(file));
+            .filter((file) =>
+              sourceExts.has(path.extname(file)) &&
+              !ignored.test(file) &&
+              file !== 'src/eslint-plugin.ts'
+            );
 
           const failures = [];
           for (const file of files) {
