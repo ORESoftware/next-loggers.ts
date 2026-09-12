@@ -11,6 +11,9 @@
   "files": [
     "dist",
     "src",
+    "sdk",
+    "contracts",
+    "docs",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -159,11 +162,6 @@
     "access": "public",
     "provenance": true
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ores-otel/ores.otel.log.git",
-    "directory": "sdk/nodejs"
-  },
   "homepage": "https://github.com/ores-otel/ores.otel.log#readme",
   "bugs": {
     "url": "https://github.com/ores-otel/ores.otel.log/issues"
@@ -200,5 +198,10 @@
     "cloudflare-workers",
     "workerd"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ores-otel/ores.otel.log.git",
+    "directory": "sdk/nodejs"
+  }
 }

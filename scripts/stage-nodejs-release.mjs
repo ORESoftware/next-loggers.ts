@@ -17,6 +17,20 @@ if (rootPackage.name !== releasePackage.name || rootPackage.version !== releaseP
   );
 }
 
+const {
+  scripts: _scripts,
+  devDependencies: _devDependencies,
+  repository: rootRepository,
+  ...publishableRoot
+} = rootPackage;
+const stagedPackage = {
+  ...publishableRoot,
+  repository: {
+    ...rootRepository,
+    directory: 'sdk/nodejs',
+  },
+};
+
 await access(join(repositoryRoot, 'dist', 'cli', 'main.js'));
 await mkdir(targetRoot, { recursive: true });
 
@@ -37,6 +51,11 @@ await cp(join(repositoryRoot, 'src'), join(targetRoot, 'src'), {
 for (const file of ['README.md', 'LICENSE', '.cli-flags.toml']) {
 await copyFile(join(repositoryRoot, file), join(targetRoot, file));
 }
+await writeFile(
+  join(targetRoot, 'package.json'),
+  `${JSON.stringify(stagedPackage, null, 2)}\n`,
+  'utf8',
+);
 await chmod(join(targetRoot, 'dist', 'cli', 'main.js'), 0o755);
 
 // Keep the publish-only package manifest's public surface exactly aligned with

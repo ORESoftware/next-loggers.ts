@@ -101,8 +101,14 @@ async function checkCatalog(
     expectString(errors, packageTable.version, releaseVersion, 'package.version');
     expectString(errors, publishTable.tag_format, zed.tagFormat, 'publish.tag_format');
 
+    const repositoryTarget = asTable(targetsTable.repository, 'targets.repository');
+    expectString(errors, repositoryTarget.dir, '.', 'targets.repository.dir');
+    expectString(errors, repositoryTarget.adapter, 'none', 'targets.repository.adapter');
+
     const expectedZedTargets = new Set<string>(ZED_TARGET_NAMES);
-    const actualZedTargets = new Set(Object.keys(targetsTable));
+    const actualZedTargets = new Set(
+      Object.keys(targetsTable).filter((target) => target !== 'repository'),
+    );
     for (const target of expectedZedTargets) {
       if (!actualZedTargets.has(target)) {
         errors.push(`.zpkg.toml is missing [targets.${target}]`);

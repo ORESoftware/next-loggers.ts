@@ -69,6 +69,13 @@ exclude = [
 ]
 smoke_test = "sh \"$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh\""
 
+# Retain the canonical whole-repository coordinate used by downstream
+# packages. Without this root target, a multi-target publish emits only the
+# language slices and `oresoftware/next-loggers` cannot be resolved.
+[targets.repository]
+dir = "."
+adapter = "none"
+
 [targets.contracts]
 dir = "contracts"
 name = "next-loggers-contracts"
