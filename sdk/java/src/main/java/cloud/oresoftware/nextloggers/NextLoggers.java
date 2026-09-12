@@ -248,12 +248,12 @@ public final class NextLoggers {
 
     /** main's spelling of setOtelEnabled. */
     public Logger withOtel(boolean enabled) {
-        return setOtelEnabled(enabled);
+      return setOtelEnabled(enabled);
     }
 
     /** main's spelling of isOtelEnabled. */
     public boolean otelEnabled() {
-        return isOtelEnabled();
+      return isOtelEnabled();
     }
 
     private Map<String, Object> emitEvent(LogEvent event) throws Exception {
@@ -302,12 +302,28 @@ public final class NextLoggers {
       return immutable;
     }
 
+    public Map<String, Object> trace(String message, Map<String, Object> fields) throws Exception {
+      return log(Level.TRACE, message, fields);
+    }
+
+    public Map<String, Object> debug(String message, Map<String, Object> fields) throws Exception {
+      return log(Level.DEBUG, message, fields);
+    }
+
     public Map<String, Object> info(String message, Map<String, Object> fields) throws Exception {
       return log(Level.INFO, message, fields);
     }
 
+    public Map<String, Object> warn(String message, Map<String, Object> fields) throws Exception {
+      return log(Level.WARN, message, fields);
+    }
+
     public Map<String, Object> error(String message, Map<String, Object> fields) throws Exception {
       return log(Level.ERROR, message, fields);
+    }
+
+    public Map<String, Object> fatal(String message, Map<String, Object> fields) throws Exception {
+      return log(Level.FATAL, message, fields);
     }
   }
 
