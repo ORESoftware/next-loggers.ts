@@ -22,7 +22,10 @@ jobs:
           const path = require('node:path');
 
           const sourceExts = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
-          const ignored = /(^|\/)(node_modules|dist|build|coverage|vendor|generated)(\/|$)/;
+          // API conformance tests deliberately exercise arbitrary trace IDs. This
+          // fleet rule applies to implementation call-site markers, not fixtures
+          // that verify the logger still accepts dynamic/runtime trace context.
+          const ignored = /(^|\/)(node_modules|dist|build|coverage|vendor|generated|tests|\.r2g)(\/|$)/;
           const files = cp.execFileSync('git', ['ls-files'], { encoding: 'utf8' })
             .split(/\r?\n/)
             .filter(Boolean)
@@ -59,5 +62,5 @@ jobs:
             process.exit(1);
           }
 
-          console.log(`checked ${files.length} JS/TS source files for ORES trace marker conventions`);
+          console.log(`checked ${files.length} implementation JS/TS source files for ORES trace marker conventions`);
           NODE
