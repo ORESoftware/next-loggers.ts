@@ -4,30 +4,30 @@ import { test } from 'node:test';
 import { Linter } from 'eslint';
 import eslintPlugin from '@oresoftware/next-loggers/eslint';
 
-function lint(code, ruleOptions) {
+function lint(code, ruleOptions, sourceType = 'module') {
   const linter = new Linter();
   return linter.verify(
     code,
     [
       {
-        languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+        languageOptions: { ecmaVersion: 'latest', sourceType },
         plugins: { 'next-loggers': eslintPlugin },
         rules: {
           'next-loggers/require-send': ['warn', ...(ruleOptions ? [ruleOptions] : [])],
         },
       },
     ],
-    { filename: 'consumer.mjs' },
+    { filename: sourceType === 'commonjs' ? 'consumer.cjs' : 'consumer.mjs' },
   );
 }
 
-function lintObservability(code, ruleOptions) {
+function lintObservability(code, ruleOptions, sourceType = 'module') {
   const linter = new Linter();
   return linter.verify(
     code,
     [
       {
-        languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+        languageOptions: { ecmaVersion: 'latest', sourceType },
         plugins: { 'next-loggers': eslintPlugin },
         rules: {
           'next-loggers/require-observability-chain': [
@@ -37,7 +37,7 @@ function lintObservability(code, ruleOptions) {
         },
       },
     ],
-    { filename: 'consumer.mjs' },
+    { filename: sourceType === 'commonjs' ? 'consumer.cjs' : 'consumer.mjs' },
   );
 }
 
@@ -129,6 +129,19 @@ test('require-send ignores unrelated modules with identical export names', () =>
   assert.deepEqual(messages, []);
 });
 
+test('require-send tracks CommonJS namespace and destructured consumers', () => {
+  const messages = lint(`
+    const logging = require('@oresoftware/next-loggers');
+    const { createLogger: makeLogger, logger: singleton } = require('@oresoftware/next-loggers');
+    const audit = makeLogger();
+    logging.logger.info('namespace missing');
+    singleton.warn('singleton sent').send();
+    audit.error('factory missing');
+  `, undefined, 'commonjs');
+  assert.equal(messages.length, 2);
+  assert.equal(messages.every((message) => message.ruleId === 'next-loggers/require-send'), true);
+});
+
 test('observability rule accepts inline ores trace and routine markers plus send', () => {
   const messages = lintObservability(`
     import { createLogger } from '@oresoftware/next-loggers';
@@ -144,6 +157,42 @@ test('observability rule accepts inline ores trace and routine markers plus send
       .send();
   `);
   assert.deepEqual(messages, []);
+});
+
+test('observability rule follows aliased imports and derived loggers', () => {
+  const messages = lintObservability(`
+    import { createLogger as makeLogger } from '@oresoftware/next-loggers';
+    const audit = makeLogger();
+    const child = audit.anew({ appName: 'child' });
+    const routineId = 'ores-routine-AliasChild_12345';
+    child?.info('complete child')
+      .addTraceId('ores-trace-AliasChild_12345')
+      .addRoutineId(routineId)
+      .send();
+    child.error('missing markers');
+  `);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].ruleId, 'next-loggers/require-observability-chain');
+  assert.match(messages[0].message, /\.send\(\)/);
+  assert.match(messages[0].message, /ores-trace/);
+});
+
+test('observability rule tracks CommonJS aliases and namespaces', () => {
+  const messages = lintObservability(`
+    const logging = require('@oresoftware/next-loggers');
+    const { createLogger: makeLogger } = require('@oresoftware/next-loggers');
+    const audit = makeLogger();
+    const routineId = 'ores-routine-CommonJS_123456';
+    logging.logger.info('namespace complete')
+      .addTraceId('ores-trace-CommonJS_123456')
+      .addRoutineId(routineId)
+      .send();
+    audit.warn('factory incomplete').send();
+  `, undefined, 'commonjs');
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].ruleId, 'next-loggers/require-observability-chain');
+  assert.match(messages[0].message, /ores-trace/);
+  assert.match(messages[0].message, /routineId/);
 });
 
 test('observability rule reports one actionable finding for incomplete chains', () => {
