@@ -134,12 +134,17 @@ jobs:
           java-version: "21"
       - name: Compile with all warnings as errors and run both suites
         working-directory: sdk/java
-        run: sh test.sh
+        run: bash test.sh
       - name: Repeat cross-thread context isolation
         working-directory: sdk/java
+        shell: bash
         run: |
+          set -euo pipefail
+          out=$(mktemp -d "${TMPDIR:-/tmp}/next-loggers-java-repeat.XXXXXX")
+          find src/main/java src/test/java -name '*.java' -print0 \
+            | xargs -0 javac --release 17 -Werror -Xlint:all -d "$out"
           for iteration in $(seq 1 20); do
-            java -ea -cp build com.oresoftware.nextloggers.NextLoggersAdversarialTest
+            java -ea -cp "$out" cloud.oresoftware.nextloggers.NextLoggersAdversarialTest
           done
 
   dart:
@@ -182,7 +187,7 @@ jobs:
           elixir-version: "1.18"
       - name: Erlang compile and EUnit
         working-directory: sdk/erlang
-        run: sh test.sh
+        run: bash test.sh
       - name: Elixir format, warnings, and ExUnit
         working-directory: sdk/elixir
-        run: sh test.sh
+        run: bash test.sh
