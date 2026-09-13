@@ -148,7 +148,7 @@ jobs:
           done
 
   dart:
-    name: Dart Zone, Supabase, and OTEL suite
+    name: Dart Zone, transport fanout, and shutdown suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -156,23 +156,14 @@ jobs:
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
-      - name: Resolve package
+      - name: Canonical Dart package gate
         working-directory: sdk/dart
-        run: dart pub get
-      - name: Format check
-        working-directory: sdk/dart
-        run: dart format --output=none --set-exit-if-changed .
-      - name: Analyze
-        working-directory: sdk/dart
-        run: dart analyze --fatal-infos
-      - name: Test
-        working-directory: sdk/dart
-        run: dart test --reporter expanded
-      - name: Repeat Zone and backpressure paths
+        run: sh test.sh
+      - name: Repeat Zone isolation and transport aggregation paths
         working-directory: sdk/dart
         run: |
           for iteration in $(seq 1 10); do
-            dart test test/adversarial_test.dart --name '100 concurrent async operations|bounded queue drops'
+            dart run test/adversarial.dart
           done
 
   beam:
