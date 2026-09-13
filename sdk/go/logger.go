@@ -388,6 +388,9 @@ func (logger *Logger) newEvent(level Level, values []any) *Event {
 	if logger.closed {
 		panic("nextloggers: logger is closed")
 	}
+	if logger.unsent == nil {
+		logger.unsent = make(map[*Event]struct{})
+	}
 	event := &Event{
 		Logger:       logger,
 		Level:        level,
@@ -732,7 +735,6 @@ func (logger *Logger) Close() error {
 			if err := closer.Close(); err != nil {
 				failures = append(failures, err)
 			}
-		}
 	}
 	logger.mu.Lock()
 	logger.closed = true
