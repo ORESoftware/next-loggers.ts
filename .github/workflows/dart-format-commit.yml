@@ -1,0 +1,52 @@
+name: Apply Dart 3.13.3 formatting once
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/dart-format-commit.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-formatting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/ores-trace-static-ids
+          fetch-depth: 1
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.3'
+      - name: Resolve and format
+        working-directory: sdk/dart
+        run: |
+          set -euo pipefail
+          dart pub get
+          dart format .
+      - name: Admit only the known formatter delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          actual="$(git status --porcelain --untracked-files=no | awk '{print $2}' | sort)"
+          expected="$(printf '%s\n' \
+            sdk/dart/lib/next_loggers.dart \
+            sdk/dart/lib/shutdown.dart \
+            sdk/dart/test/adversarial_test.dart | sort)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo 'Unexpected Dart formatter change set:' >&2
+            printf '%s\n' "$actual" >&2
+            exit 1
+          fi
+      - name: Commit canonical Dart formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sdk/dart/lib/next_loggers.dart sdk/dart/lib/shutdown.dart sdk/dart/test/adversarial_test.dart
+          git commit -m 'style(dart): apply Dart 3.13.3 canonical formatting'
+          git push origin HEAD:chore/ores-trace-static-ids
