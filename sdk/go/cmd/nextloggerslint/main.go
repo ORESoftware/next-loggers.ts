@@ -74,61 +74,48 @@ func lintFile(path string, source []byte, loggerNames map[string]struct{}) ([]st
 	if err != nil {
 		return nil, err
 	}
-	extras := make([]string, 0, len(loggerNames))
-	for name := range loggerNames {
-		extras = append(extras, name)
-	}
-	found, err := checkFile(fileSet, path, map[string]bool{}, extras)
-	if err != nil {
-		return nil, err
-	}
-	// checkFile skips files that do not import the SDK. Unit tests pass
-	// explicit logger names and source without that import.
-	if len(found) == 0 {
-		var methodsFindings []finding
-		ast.Inspect(tree, func(node ast.Node) bool {
-			statement, ok := node.(*ast.ExprStmt)
-			if !ok {
-				return true
-			}
-			var methods []string
-			root := callChain(statement.X, &methods)
-			if root == "" {
-				return true
-			}
-			if _, known := loggerNames[root]; !known {
-				if index := strings.LastIndex(root, "."); index >= 0 {
-					if _, knownField := loggerNames[root[index+1:]]; !knownField {
-						return true
-					}
-				} else {
-					return true
-				}
-			}
-			levelIndex := -1
-			for index, method := range methods {
-				if levelMethods[method] {
-					levelIndex = index
-					break
-				}
-			}
-			if levelIndex < 0 {
-				return true
-			}
-			for _, method := range methods[levelIndex+1:] {
-				if sendMethods[method] {
-					return true
-				}
-			}
-			position := fileSet.Position(statement.Pos())
-			methodsFindings = append(methodsFindings, finding{
-				position: position,
-				message:  "NL100 next-loggers event is never sent; call .Send() so it reaches transports",
-			})
+	var found []finding
+	ast.Inspect(tree, func(node ast.Node) bool {
+		statement, ok := node.(*ast.ExprStmt)
+		if !ok {
 			return true
+		}
+		var methods []string
+		root := callChain(statement.X, &methods)
+		if root == "" {
+			return true
+		}
+		if _, known := loggerNames[root]; !known {
+			if index := strings.LastIndex(root, "."); index >= 0 {
+				if _, knownField := loggerNames[root[index+1:]]; !knownField {
+					return true
+				}
+			} else {
+				return true
+			}
+		}
+		levelIndex := -1
+		for index, method := range methods {
+			if levelMethods[method] {
+				levelIndex = index
+				break
+			}
+		}
+		if levelIndex < 0 {
+			return true
+		}
+		for _, method := range methods[levelIndex+1:] {
+			if sendMethods[method] {
+				return true
+			}
+		}
+		position := fileSet.Position(statement.Pos())
+		found = append(found, finding{
+			position: position,
+			message:  "NL100 next-loggers event is never sent; call .Send() so it reaches transports",
 		})
-		found = methodsFindings
-	}
+		return true
+	})
 	out := make([]struct {
 		Path    string
 		Line    int
