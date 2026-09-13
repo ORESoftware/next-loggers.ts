@@ -182,27 +182,31 @@ fn handle_message(
       let next_attempt = attempts + 1
       case current_phase {
         Running -> {
-          let event = event(
-            Draining,
-            Running,
-            trigger,
-            interactive,
-            next_attempt,
-            started_at_milliseconds,
-          )
+          let event =
+            event(
+              Draining,
+              Running,
+              trigger,
+              interactive,
+              next_attempt,
+              started_at_milliseconds,
+            )
           observer(event)
           process.send(reply, Drain)
-          actor.continue(State(..state, phase: Draining, attempts: next_attempt))
+          actor.continue(
+            State(..state, phase: Draining, attempts: next_attempt),
+          )
         }
         Draining -> {
-          let event = event(
-            Forcing,
-            Draining,
-            trigger,
-            interactive,
-            next_attempt,
-            started_at_milliseconds,
-          )
+          let event =
+            event(
+              Forcing,
+              Draining,
+              trigger,
+              interactive,
+              next_attempt,
+              started_at_milliseconds,
+            )
           observer(event)
           process.send(reply, Force)
           actor.continue(State(..state, phase: Forcing, attempts: next_attempt))
@@ -221,14 +225,15 @@ fn handle_message(
           actor.continue(State(..state, attempts: next_attempt))
         }
         Running | Draining -> {
-          let event = event(
-            Forcing,
-            current_phase,
-            trigger,
-            interactive,
-            next_attempt,
-            started_at_milliseconds,
-          )
+          let event =
+            event(
+              Forcing,
+              current_phase,
+              trigger,
+              interactive,
+              next_attempt,
+              started_at_milliseconds,
+            )
           observer(event)
           process.send(reply, Force)
           actor.continue(State(..state, phase: Forcing, attempts: next_attempt))
@@ -238,14 +243,15 @@ fn handle_message(
     MarkStopped(trigger, interactive, reply) -> {
       case current_phase {
         Stopped -> Nil
-        _ -> observer(event(
-          Stopped,
-          current_phase,
-          trigger,
-          interactive,
-          attempts,
-          started_at_milliseconds,
-        ))
+        _ ->
+          observer(event(
+            Stopped,
+            current_phase,
+            trigger,
+            interactive,
+            attempts,
+            started_at_milliseconds,
+          ))
       }
       process.send(reply, Nil)
       actor.continue(State(..state, phase: Stopped))

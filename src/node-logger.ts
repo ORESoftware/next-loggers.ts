@@ -170,13 +170,19 @@ export class NodeLogger extends BaseLogger {
     }
 
     const uncaughtException = (error: Error): void => {
+      const routineId = 'ores-routine-Nd7kQ2_mV9sL4pX6cT8Za';
       void this.fatal('Uncaught Node.js exception', error)
+        .addTraceId('ores-trace-cW7Kq3_nR9fX2mP8AzL4H')
+        .addRoutineId(routineId)
         .addTags('node', 'uncaught-exception')
         .captureStackTrace()
         .send();
     };
     const unhandledRejection = (reason: unknown): void => {
+      const routineId = 'ores-routine-Hm4Qv8_xT2pL7nR5sK9Wc';
       void this.error('Unhandled Node.js promise rejection', reason)
+        .addTraceId('ores-trace-Yp6dT0K_vN2xR7QmC9sJb')
+        .addRoutineId(routineId)
         .addTags('node', 'unhandled-rejection')
         .captureStackTrace()
         .send();

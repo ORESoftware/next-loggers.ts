@@ -187,8 +187,11 @@ export class BrowserLogger extends BaseLogger {
     }
 
     const errorHandler = (event: Event): void => {
+      const routineId = 'ores-routine-Q7mN2_vL5xR8pT3cK9Ha';
       const errorEvent = event as ErrorEvent;
       void this.error(errorEvent.message || 'Unhandled browser error', errorEvent.error)
+        .addTraceId('ores-trace-B4pX8_kM2sQ7vN5cR9Ld')
+        .addRoutineId(routineId)
         .addFields({
           filename: errorEvent.filename,
           line: errorEvent.lineno,
@@ -199,16 +202,22 @@ export class BrowserLogger extends BaseLogger {
         .send();
     };
     const rejectionHandler = (event: Event): void => {
+      const routineId = 'ores-routine-T6cR9_mP3xK7vN2sL5Qb';
       const rejectionEvent = event as PromiseRejectionEvent;
       void this.error('Unhandled browser promise rejection', rejectionEvent.reason)
+        .addTraceId('ores-trace-H8nV3_qL7mP2xR5cK9Ts')
+        .addRoutineId(routineId)
         .addTags('browser', 'unhandled-rejection')
         .captureStackTrace()
         .send();
     };
 
     const cspHandler = (event: Event): void => {
+      const routineId = 'ores-routine-C5xK8_vN2mQ7pR4sL9Td';
       const violation = event as SecurityPolicyViolationEvent;
       void this.warn('Content Security Policy violation', violation.violatedDirective)
+        .addTraceId('ores-trace-M3qR7_xK9vN2pL5cT8Hs')
+        .addRoutineId(routineId)
         .addFields({
           blockedURI: violation.blockedURI,
           sourceFile: violation.sourceFile,
@@ -257,7 +266,6 @@ export class BrowserLogger extends BaseLogger {
   }
 
   override async close(options: FlushOptions = {}): Promise<void> {
-    this.removeGlobalHandlers?.();
     if (this.unloadRegistered) {
       unregisterBrowserLogger(this);
       this.unloadRegistered = false;

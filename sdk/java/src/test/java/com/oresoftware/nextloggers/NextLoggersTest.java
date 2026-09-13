@@ -37,7 +37,7 @@ public final class NextLoggersTest {
     } finally {
       scope.close();
     }
-    NextLoggers.LogRecord record = transport.records().getFirst();
+    NextLoggers.LogRecord record = transport.records().get(0);
     assert record.traceId().equals("trace-1");
     assert record.fields().get("otel.span_id").equals("span-1");
     assert record.fields().get("route").equals("/pay");
@@ -50,7 +50,7 @@ public final class NextLoggersTest {
     CountDownLatch go = new CountDownLatch(1);
     AtomicReference<String> left = new AtomicReference<>();
     AtomicReference<String> right = new AtomicReference<>();
-    Thread first = Thread.ofPlatform().start(() -> {
+    Thread first = new Thread(() -> {
       NextLoggers.Scope scope = NextLoggers.withContext(new NextLoggers.TraceContext("left", "s1", 1));
       try {
         ready.countDown(); await(go); left.set(NextLoggers.currentContext().traceId());
@@ -58,7 +58,7 @@ public final class NextLoggersTest {
         scope.close();
       }
     });
-    Thread second = Thread.ofPlatform().start(() -> {
+    Thread second = new Thread(() -> {
       NextLoggers.Scope scope = NextLoggers.withContext(new NextLoggers.TraceContext("right", "s2", 1));
       try {
         ready.countDown(); await(go); right.set(NextLoggers.currentContext().traceId());
@@ -66,6 +66,8 @@ public final class NextLoggersTest {
         scope.close();
       }
     });
+    first.start();
+    second.start();
     ready.await(); go.countDown(); first.join(); second.join();
     assert left.get().equals("left");
     assert right.get().equals("right");

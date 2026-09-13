@@ -285,7 +285,11 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		event.AddUserInfo(user)
 	}
 	if value.TraceID != "" {
-		event.AddTrace(value.TraceID, true)
+		if event.TraceID == "" {
+			event.AddTrace(value.TraceID, true)
+		} else {
+			event.AddTrace(value.TraceID)
+		}
 	}
 	for _, traceID := range value.TraceIDs {
 		event.AddTrace(traceID)

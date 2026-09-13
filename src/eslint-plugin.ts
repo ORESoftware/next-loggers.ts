@@ -2,16 +2,19 @@ import type { ESLint, Linter, Rule } from 'eslint';
 
 type AstNode = Rule.Node & {
   argument?: Rule.Node;
+  arguments?: Rule.Node[];
   callee?: Rule.Node;
   computed?: boolean;
   expression?: Rule.Node;
   id?: Rule.Node;
   imported?: Rule.Node & { name?: string; value?: unknown };
   init?: Rule.Node | null;
+  key?: Rule.Node & { name?: string; value?: unknown };
   left?: Rule.Node;
   local?: Rule.Node & { name?: string };
   name?: string;
   object?: Rule.Node;
+  properties?: Rule.Node[];
   property?: Rule.Node & { name?: string; value?: unknown };
   right?: Rule.Node;
   source?: { value?: unknown };
@@ -148,36 +151,72 @@ function isNextLoggersModule(source: unknown, moduleNames: Set<string>): source 
   return false;
 }
 
-export const requireSendRule: Rule.RuleModule = {
-  meta: {
-    type: 'problem',
-    docs: {
-      description: 'require chainable next-loggers events to call send()',
-      recommended: true,
-    },
-    schema: [
-      {
-        type: 'object',
-        properties: {
-          loggerNames: { type: 'array', items: { type: 'string' }, uniqueItems: true },
-          moduleNames: { type: 'array', items: { type: 'string' }, uniqueItems: true },
-        },
-        additionalProperties: false,
-      },
-    ],
-    messages: {
-      missingSend: 'Call .send() on this log event so it is delivered before shutdown.',
-    },
-  },
+function literalString(node: Rule.Node | null | undefined): string | undefined {
+  const current = unwrap(node);
+  if (!current) {
+    return undefined;
+  }
+  if (current.type === 'Literal' && typeof current.value === 'string') {
+    return current.value;
+  }
+  return undefined;
+}
 
-  create(context) {
-    const options = (context.options[0] || {}) as RequireSendRuleOptions;
-    const knownLoggers = new Set(['log', 'logger', 'ddlog', ...(options.loggerNames || [])]);
-    const knownFactories = new Set<string>();
-    const knownClasses = new Set<string>();
-    const moduleNames = new Set(['@oresoftware/next-loggers', ...(options.moduleNames || [])]);
+interface LoggerTrackingState {
+  knownLoggers: Set<string>;
+  knownFactories: Set<string>;
+  knownClasses: Set<string>;
+  moduleNames: Set<string>;
+  isLoggerProducer(node: Rule.Node | null | undefined): boolean;
+  importDeclaration(node: Rule.Node): void;
+  variableDeclarator(node: Rule.Node): void;
+  assignmentExpression(node: Rule.Node): void;
+}
 
-    const isLoggerProducer = (node: Rule.Node | null | undefined): boolean => {
+function createLoggerTrackingState(
+  options: RequireSendRuleOptions,
+): LoggerTrackingState {
+  const knownLoggers = new Set(['log', 'logger', 'ddlog', ...(options.loggerNames || [])]);
+  const knownFactories = new Set<string>();
+  const knownClasses = new Set<string>();
+  const moduleNames = new Set(['@oresoftware/next-loggers', ...(options.moduleNames || [])]);
+
+  const registerExport = (exportedName: string, localName: string): void => {
+    if (exportedName === 'default' || LOGGER_EXPORTS.has(exportedName)) {
+      knownLoggers.add(localName);
+    }
+    if (FACTORY_EXPORTS.has(exportedName)) {
+      knownFactories.add(localName);
+    }
+    if (CLASS_EXPORTS.has(exportedName)) {
+      knownClasses.add(localName);
+    }
+  };
+
+  const registerNamespace = (localName: string): void => {
+    for (const name of LOGGER_EXPORTS) knownLoggers.add(`${localName}.${name}`);
+    for (const name of FACTORY_EXPORTS) knownFactories.add(`${localName}.${name}`);
+    for (const name of CLASS_EXPORTS) knownClasses.add(`${localName}.${name}`);
+  };
+
+  const requireModuleName = (node: Rule.Node | null | undefined): string | undefined => {
+    const current = unwrap(node);
+    if (!current || !hasType(current, 'CallExpression', 'OptionalCallExpression')) {
+      return undefined;
+    }
+    if (getQualifiedName(current.callee) !== 'require') {
+      return undefined;
+    }
+    const source = literalString(current.arguments?.[0]);
+    return source && isNextLoggersModule(source, moduleNames) ? source : undefined;
+  };
+
+  const state: LoggerTrackingState = {
+    knownLoggers,
+    knownFactories,
+    knownClasses,
+    moduleNames,
+    isLoggerProducer(node: Rule.Node | null | undefined): boolean {
       const current = unwrap(node);
       if (!current) {
         return false;
@@ -203,61 +242,144 @@ export const requireSendRule: Rule.RuleModule = {
         }
       }
       return false;
-    };
+    },
+    importDeclaration(node: Rule.Node): void {
+      const declaration = node as AstNode;
+      if (!isNextLoggersModule(declaration.source?.value, moduleNames)) {
+        return;
+      }
+      for (const rawSpecifier of declaration.specifiers || []) {
+        const specifier = rawSpecifier as AstNode;
+        const localName = specifier.local?.name;
+        if (!localName) {
+          continue;
+        }
+        if (specifier.type === 'ImportDefaultSpecifier') {
+          knownLoggers.add(localName);
+          continue;
+        }
+        if (specifier.type === 'ImportNamespaceSpecifier') {
+          registerNamespace(localName);
+          continue;
+        }
+        const importedName = specifier.imported?.name || specifier.imported?.value;
+        if (typeof importedName === 'string') {
+          registerExport(importedName, localName);
+        }
+      }
+    },
+    variableDeclarator(node: Rule.Node): void {
+      const declaration = node as AstNode;
+      const identifier = declaration.id as AstNode | undefined;
 
-    return {
-      ImportDeclaration(node: Rule.Node): void {
-        const declaration = node as AstNode;
-        if (!isNextLoggersModule(declaration.source?.value, moduleNames)) {
+      if (requireModuleName(declaration.init)) {
+        if (identifier?.type === 'Identifier' && identifier.name) {
+          registerNamespace(identifier.name);
           return;
         }
-        for (const rawSpecifier of declaration.specifiers || []) {
-          const specifier = rawSpecifier as AstNode;
-          const localName = specifier.local?.name;
-          if (!localName) {
-            continue;
+        if (identifier?.type === 'ObjectPattern') {
+          for (const rawProperty of identifier.properties || []) {
+            const property = rawProperty as AstNode;
+            if (property.type !== 'Property') {
+              continue;
+            }
+            const key = property.key as AstNode | undefined;
+            const value = property.value as AstNode | undefined;
+            const exportedName =
+              key?.type === 'Identifier'
+                ? key.name
+                : key?.type === 'Literal' && typeof key.value === 'string'
+                  ? key.value
+                  : undefined;
+            const localName = value?.type === 'Identifier' ? value.name : undefined;
+            if (exportedName && localName) {
+              registerExport(exportedName, localName);
+            }
           }
-          if (specifier.type === 'ImportDefaultSpecifier') {
-            knownLoggers.add(localName);
-            continue;
-          }
-          if (specifier.type === 'ImportNamespaceSpecifier') {
-            for (const name of LOGGER_EXPORTS) knownLoggers.add(`${localName}.${name}`);
-            for (const name of FACTORY_EXPORTS) knownFactories.add(`${localName}.${name}`);
-            for (const name of CLASS_EXPORTS) knownClasses.add(`${localName}.${name}`);
-            continue;
-          }
-          const importedName = specifier.imported?.name || specifier.imported?.value;
-          if (typeof importedName !== 'string') {
-            continue;
-          }
-          if (LOGGER_EXPORTS.has(importedName)) knownLoggers.add(localName);
-          if (FACTORY_EXPORTS.has(importedName)) knownFactories.add(localName);
-          if (CLASS_EXPORTS.has(importedName)) knownClasses.add(localName);
+          return;
         }
-      },
+      }
 
-      VariableDeclarator(node: Rule.Node): void {
-        const declaration = node as AstNode;
-        const identifier = declaration.id as AstNode | undefined;
-        if (identifier?.type === 'Identifier' && identifier.name && isLoggerProducer(declaration.init)) {
-          knownLoggers.add(identifier.name);
-        }
-      },
+      if (identifier?.type === 'Identifier' && identifier.name && state.isLoggerProducer(declaration.init)) {
+        knownLoggers.add(identifier.name);
+      }
+    },
+    assignmentExpression(node: Rule.Node): void {
+      const assignment = node as AstNode;
+      const assignedName = getQualifiedName(assignment.left);
+      if (assignedName && state.isLoggerProducer(assignment.right)) {
+        knownLoggers.add(assignedName);
+      }
+    },
+  };
 
-      AssignmentExpression(node: Rule.Node): void {
-        const assignment = node as AstNode;
-        const assignedName = getQualifiedName(assignment.left);
-        if (assignedName && isLoggerProducer(assignment.right)) {
-          knownLoggers.add(assignedName);
-        }
-      },
+  return state;
+}
 
+function compactSource(value: string): string {
+  return value.replace(/\s+/g, '');
+}
+
+function argumentFor(compact: string, method: string): { literal?: string; dynamic: boolean } | undefined {
+  const offset = compact.indexOf(method);
+  if (offset < 0) {
+    return undefined;
+  }
+  const rest = compact.slice(offset + method.length);
+  const quote = rest[0];
+  if (quote !== "'" && quote !== '"' && quote !== '`') {
+    return { dynamic: true };
+  }
+  const end = rest.indexOf(quote, 1);
+  if (end < 0) {
+    return { dynamic: true };
+  }
+  return { literal: rest.slice(1, end), dynamic: false };
+}
+
+function validMarker(value: string | undefined, prefix: string): boolean {
+  if (!value?.startsWith(prefix)) {
+    return false;
+  }
+  const suffix = value.slice(prefix.length);
+  return suffix.length >= 12 && suffix.length <= 64 && /^[A-Za-z0-9_-]+$/.test(suffix);
+}
+
+export const requireSendRule: Rule.RuleModule = {
+  meta: {
+    type: 'problem',
+    docs: {
+      description: 'require chainable next-loggers events to call send()',
+      recommended: false,
+    },
+    schema: [
+      {
+        type: 'object',
+        properties: {
+          loggerNames: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+          moduleNames: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+        },
+        additionalProperties: false,
+      },
+    ],
+    messages: {
+      missingSend: 'Call .send() on this log event so it is delivered before shutdown.',
+    },
+  },
+
+  create(context) {
+    const options = (context.options[0] || {}) as RequireSendRuleOptions;
+    const state = createLoggerTrackingState(options);
+
+    return {
+      ImportDeclaration: state.importDeclaration,
+      VariableDeclarator: state.variableDeclarator,
+      AssignmentExpression: state.assignmentExpression,
       ExpressionStatement(node: Rule.Node): void {
         const statement = node as AstNode;
         const methods: string[] = [];
         const root = collectCallChain(statement.expression, methods);
-        if (!root || !knownLoggers.has(root)) {
+        if (!root || !state.knownLoggers.has(root)) {
           return;
         }
         const levelIndex = methods.findIndex((method) => LEVEL_METHODS.has(method));
@@ -270,8 +392,81 @@ export const requireSendRule: Rule.RuleModule = {
   },
 };
 
+export const requireObservabilityChainRule: Rule.RuleModule = {
+  meta: {
+    type: 'problem',
+    docs: {
+      description: 'require next-loggers chains to include static trace/routine markers and send()',
+      recommended: true,
+    },
+    schema: [
+      {
+        type: 'object',
+        properties: {
+          loggerNames: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+          moduleNames: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+        },
+        additionalProperties: false,
+      },
+    ],
+    messages: {
+      incompleteChain: 'Complete this next-loggers chain; missing or invalid: {{requirements}}.',
+    },
+  },
+
+  create(context) {
+    const options = (context.options[0] || {}) as RequireSendRuleOptions;
+    const state = createLoggerTrackingState(options);
+
+    return {
+      ImportDeclaration: state.importDeclaration,
+      VariableDeclarator: state.variableDeclarator,
+      AssignmentExpression: state.assignmentExpression,
+      ExpressionStatement(node: Rule.Node): void {
+        const statement = node as AstNode;
+        const methods: string[] = [];
+        const root = collectCallChain(statement.expression, methods);
+        if (!root || !state.knownLoggers.has(root)) {
+          return;
+        }
+        const levelIndex = methods.findIndex((method) => LEVEL_METHODS.has(method));
+        if (levelIndex < 0) {
+          return;
+        }
+
+        const missing: string[] = [];
+        if (!methods.slice(levelIndex + 1).includes('send')) {
+          missing.push('.send()');
+        }
+
+        const compact = compactSource(context.sourceCode.getText(node));
+        const trace = argumentFor(compact, '.addTraceId(') || argumentFor(compact, '.addTrace(');
+        if (!trace || trace.dynamic || !validMarker(trace.literal, 'ores-trace-')) {
+          missing.push("inline addTrace/addTraceId('ores-trace-*')");
+        }
+
+        const routine = argumentFor(compact, '.addRoutineId(') || argumentFor(compact, '.addRoutine(');
+        const namedRoutine =
+          compact.includes('.addRoutineId(routineId)') || compact.includes('.addRoutine(routineId)');
+        if (!routine || (routine.dynamic && !namedRoutine) || (!routine.dynamic && !validMarker(routine.literal, 'ores-routine-'))) {
+          missing.push('addRoutine/addRoutineId(routineId or ores-routine-*)');
+        }
+
+        if (missing.length > 0) {
+          context.report({
+            node,
+            messageId: 'incompleteChain',
+            data: { requirements: missing.join(', ') },
+          });
+        }
+      },
+    };
+  },
+};
+
 export const rules = {
   'require-send': requireSendRule,
+  'require-observability-chain': requireObservabilityChainRule,
 };
 
 export const eslintPlugin: {
@@ -293,7 +488,7 @@ eslintPlugin.configs.recommended = {
     'next-loggers': eslintPlugin as ESLint.Plugin,
   },
   rules: {
-    'next-loggers/require-send': 'warn',
+    'next-loggers/require-observability-chain': 'warn',
   },
 };
 

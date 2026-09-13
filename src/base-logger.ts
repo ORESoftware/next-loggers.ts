@@ -1,4 +1,4 @@
-ok export const LOG_LEVELS = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'] as const;
+export const LOG_LEVELS = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 export type LogArgument = unknown;

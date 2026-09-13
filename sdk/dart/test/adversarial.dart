@@ -3,21 +3,51 @@ import 'dart:async';
 import '../lib/next_loggers.dart';
 
 Future<void> main() async {
-  await _run('nested async contexts restore the parent', _nestedContextsRestore);
-  await _run('context restores after asynchronous failure', _contextRestoresAfterFailure);
-  await _run('100 concurrent Zones never cross-contaminate', _concurrentZonesAreIsolated);
-  await _run('field precedence is logger, context, then event', _fieldPrecedence);
-  await _run('records without context omit correlation optionals', _optionalCorrelationFields);
+  await _run(
+    'nested async contexts restore the parent',
+    _nestedContextsRestore,
+  );
+  await _run(
+    'context restores after asynchronous failure',
+    _contextRestoresAfterFailure,
+  );
+  await _run(
+    '100 concurrent Zones never cross-contaminate',
+    _concurrentZonesAreIsolated,
+  );
+  await _run(
+    'field precedence is logger, context, then event',
+    _fieldPrecedence,
+  );
+  await _run(
+    'records without context omit correlation optionals',
+    _optionalCorrelationFields,
+  );
   await _run('all OTEL severity mappings are stable', _allSeverityMappings);
   await _run('OTEL copies trace and structured fields', _otelCorrelation);
   await _run('OTEL output is deeply immutable', _otelOutputIsImmutable);
-  await _run('Supabase receives the canonical immutable record', _supabaseGetsCanonicalRecord);
+  await _run(
+    'Supabase receives the canonical immutable record',
+    _supabaseGetsCanonicalRecord,
+  );
   await _run('transport fanout preserves configuration order', _transportOrder);
-  await _run('transport failures aggregate after full fanout', _transportFailureAggregation);
-  await _run('records and nested values are deeply immutable', _recordIsDeeplyImmutable);
-  await _run('input mutations cannot change emitted records', _inputMutationIsolation);
+  await _run(
+    'transport failures aggregate after full fanout',
+    _transportFailureAggregation,
+  );
+  await _run(
+    'records and nested values are deeply immutable',
+    _recordIsDeeplyImmutable,
+  );
+  await _run(
+    'input mutations cannot change emitted records',
+    _inputMutationIsolation,
+  );
   await _run('custom values are copied into the wire record', _customValues);
-  await _run('deterministic ID and clock hooks are honored', _deterministicHooks);
+  await _run(
+    'deterministic ID and clock hooks are honored',
+    _deterministicHooks,
+  );
   await _run('invalid application names are rejected', _invalidApplicationName);
   await _run('generated IDs are unique', _generatedIdsAreUnique);
   await _run('runtime and logger name are preserved', _runtimeAndName);
@@ -59,7 +89,10 @@ Future<void> _contextRestoresAfterFailure() async {
       actual = error;
     }
     _check(identical(actual, expected), 'exception identity changed');
-    _check(currentLogContext?.traceId == 'parent', 'parent not restored after failure');
+    _check(
+      currentLogContext?.traceId == 'parent',
+      'parent not restored after failure',
+    );
   });
   _check(currentLogContext == null, 'failed context leaked');
 }
@@ -71,23 +104,31 @@ Future<void> _concurrentZonesAreIsolated() async {
     transports: <LogTransport>[_CaptureTransport(records)],
   );
   const count = 100;
-  await Future.wait(List<Future<void>>.generate(count, (index) async {
-    final suffix = index.toString().padLeft(3, '0');
-    await withLogContext(
-      LogContext(traceId: 'trace-$suffix', spanId: 'span-$suffix'),
-      () async {
-        await Future<void>.delayed(Duration(microseconds: (index % 7) * 10));
-        await logger.info('message-$suffix');
-      },
-    );
-  }));
+  await Future.wait(
+    List<Future<void>>.generate(count, (index) async {
+      final suffix = index.toString().padLeft(3, '0');
+      await withLogContext(
+        LogContext(traceId: 'trace-$suffix', spanId: 'span-$suffix'),
+        () async {
+          await Future<void>.delayed(Duration(microseconds: (index % 7) * 10));
+          await logger.info('message-$suffix');
+        },
+      );
+    }),
+  );
   _check(records.length == count, 'concurrent records missing');
   for (final record in records) {
     final message = record['message']! as String;
     final suffix = message.substring('message-'.length);
     final fields = record['fields']! as Map<String, Object?>;
-    _check(record['traceId'] == 'trace-$suffix', 'trace contamination for $message');
-    _check(fields['otel.span_id'] == 'span-$suffix', 'span contamination for $message');
+    _check(
+      record['traceId'] == 'trace-$suffix',
+      'trace contamination for $message',
+    );
+    _check(
+      fields['otel.span_id'] == 'span-$suffix',
+      'span contamination for $message',
+    );
   }
 }
 
@@ -97,14 +138,13 @@ Future<void> _fieldPrecedence() async {
     fields: const <String, Object?>{'source': 'logger', 'loggerOnly': true},
   );
   final record = await withLogContext(
-    const LogContext(fields: <String, Object?>{
-      'source': 'context',
-      'contextOnly': true,
-    }),
-    () => logger.info('inside', fields: const <String, Object?>{
-      'source': 'event',
-      'eventOnly': true,
-    }),
+    const LogContext(
+      fields: <String, Object?>{'source': 'context', 'contextOnly': true},
+    ),
+    () => logger.info(
+      'inside',
+      fields: const <String, Object?>{'source': 'event', 'eventOnly': true},
+    ),
   );
   final fields = record['fields']! as Map<String, Object?>;
   _check(fields['source'] == 'event', 'event field did not win');
@@ -120,7 +160,10 @@ Future<void> _optionalCorrelationFields() async {
   _check(!record.containsKey('tags'), 'tags should be omitted');
   final fields = record['fields']! as Map<String, Object?>;
   _check(!fields.containsKey('otel.span_id'), 'span ID should be omitted');
-  _check(!fields.containsKey('otel.trace_flags'), 'trace flags should be omitted');
+  _check(
+    !fields.containsKey('otel.trace_flags'),
+    'trace flags should be omitted',
+  );
 }
 
 Future<void> _allSeverityMappings() async {
@@ -143,7 +186,10 @@ Future<void> _allSeverityMappings() async {
   _check(emitted.length == expected.length, 'severity records missing');
   for (final value in emitted) {
     final text = value['severityText']! as String;
-    _check(value['severityNumber'] == expected[text], 'wrong severity for $text');
+    _check(
+      value['severityNumber'] == expected[text],
+      'wrong severity for $text',
+    );
   }
 }
 
@@ -151,7 +197,9 @@ Future<void> _otelCorrelation() async {
   Map<String, Object?>? emitted;
   final logger = Logger(
     appName: 'otel',
-    transports: <LogTransport>[OpenTelemetryTransport((value) => emitted = value)],
+    transports: <LogTransport>[
+      OpenTelemetryTransport((value) => emitted = value),
+    ],
   );
   await withLogContext(
     const LogContext(
@@ -160,20 +208,31 @@ Future<void> _otelCorrelation() async {
       traceFlags: 1,
       fields: <String, Object?>{'requestId': 'request-1'},
     ),
-    () => logger.error('failed', fields: const <String, Object?>{'orderId': 'order-42'}),
+    () => logger.error(
+      'failed',
+      fields: const <String, Object?>{'orderId': 'order-42'},
+    ),
   );
   final attributes = emitted!['attributes']! as Map<String, Object?>;
   _check(emitted!['severityNumber'] == 17, 'error severity missing');
   _check(attributes['trace.id'] == 'trace-otel', 'trace attribute missing');
-  _check(attributes['next_logger.field.otel.span_id'] == 'span-otel', 'span attribute missing');
-  _check(attributes['next_logger.field.orderId'] == 'order-42', 'event field missing');
+  _check(
+    attributes['next_logger.field.otel.span_id'] == 'span-otel',
+    'span attribute missing',
+  );
+  _check(
+    attributes['next_logger.field.orderId'] == 'order-42',
+    'event field missing',
+  );
 }
 
 Future<void> _otelOutputIsImmutable() async {
   Map<String, Object?>? emitted;
   final logger = Logger(
     appName: 'immutable-otel',
-    transports: <LogTransport>[OpenTelemetryTransport((value) => emitted = value)],
+    transports: <LogTransport>[
+      OpenTelemetryTransport((value) => emitted = value),
+    ],
   );
   await logger.info('immutable');
   _expectUnsupported(() => emitted!['body'] = 'mutated');
@@ -185,10 +244,18 @@ Future<void> _supabaseGetsCanonicalRecord() async {
   Map<String, Object?>? captured;
   final logger = Logger(
     appName: 'supabase',
-    transports: <LogTransport>[SupabaseTransport((record) => captured = record)],
+    transports: <LogTransport>[
+      SupabaseTransport((record) => captured = record),
+    ],
   );
-  final returned = await logger.info('client', fields: const <String, Object?>{'safe': true});
-  _check(identical(captured, returned), 'Supabase did not receive canonical record');
+  final returned = await logger.info(
+    'client',
+    fields: const <String, Object?>{'safe': true},
+  );
+  _check(
+    identical(captured, returned),
+    'Supabase did not receive canonical record',
+  );
   _expectUnsupported(() => captured!['message'] = 'mutated');
   final fields = captured!['fields']! as Map<String, Object?>;
   _expectUnsupported(() => fields['safe'] = false);
@@ -236,7 +303,10 @@ Future<void> _transportFailureAggregation() async {
     actual = error;
   }
   _check(actual != null, 'transport failures were not aggregated');
-  _check(_listEquals(calls, <String>['first', 'middle', 'last']), 'fanout stopped early');
+  _check(
+    _listEquals(calls, <String>['first', 'middle', 'last']),
+    'fanout stopped early',
+  );
   _check(actual!.errors.length == 2, 'wrong failure count');
   _check(identical(actual.errors[0], first), 'first error identity changed');
   _check(identical(actual.errors[1], second), 'second error identity changed');
@@ -248,7 +318,10 @@ Future<void> _recordIsDeeplyImmutable() async {
     'freeze',
     fields: <String, Object?>{
       'nested': <String, Object?>{'value': 1},
-      'list': <Object?>[1, <String, Object?>{'two': 2}],
+      'list': <Object?>[
+        1,
+        <String, Object?>{'two': 2},
+      ],
     },
   );
   _expectUnsupported(() => record['message'] = 'mutated');
@@ -277,16 +350,20 @@ Future<void> _inputMutationIsolation() async {
   final nested = fields['nested']! as Map<String, Object?>;
   final items = fields['items']! as List<Object?>;
   _check(nested['value'] == 'logger', 'logger fields were not snapshotted');
-  _check(_listEquals(items, <Object?>['one', 'two']), 'event values alias caller list');
+  _check(
+    _listEquals(items, <Object?>['one', 'two']),
+    'event values alias caller list',
+  );
 }
 
 Future<void> _customValues() async {
-  final input = <Object?>['message', 42, <String, Object?>{'safe': true}];
-  final record = await Logger(appName: 'values').log(
-    LogLevel.info,
+  final input = <Object?>[
     'message',
-    values: input,
-  );
+    42,
+    <String, Object?>{'safe': true},
+  ];
+  final record = await Logger(appName: 'values')
+      .log(LogLevel.info, 'message', values: input);
   input.add('mutated');
   final values = record['values']! as List<Object?>;
   _check(values.length == 3, 'custom values changed after input mutation');
@@ -301,7 +378,10 @@ Future<void> _deterministicHooks() async {
   );
   final record = await logger.info('fixed');
   _check(record['id'] == 'fixed-id', 'ID hook ignored');
-  _check(record['timestamp'] == '2026-01-02T03:04:05.000Z', 'clock hook ignored');
+  _check(
+    record['timestamp'] == '2026-01-02T03:04:05.000Z',
+    'clock hook ignored',
+  );
 }
 
 Future<void> _invalidApplicationName() async {

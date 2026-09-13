@@ -134,16 +134,21 @@ jobs:
           java-version: "21"
       - name: Compile with all warnings as errors and run both suites
         working-directory: sdk/java
-        run: sh test.sh
+        run: bash test.sh
       - name: Repeat cross-thread context isolation
         working-directory: sdk/java
+        shell: bash
         run: |
+          set -euo pipefail
+          out=$(mktemp -d "${TMPDIR:-/tmp}/next-loggers-java-repeat.XXXXXX")
+          find src/main/java src/test/java -name '*.java' -print0 \
+            | xargs -0 javac --release 17 -Werror -Xlint:all -d "$out"
           for iteration in $(seq 1 20); do
-            java -ea -cp build com.oresoftware.nextloggers.NextLoggersAdversarialTest
+            java -ea -cp "$out" cloud.oresoftware.nextloggers.NextLoggersAdversarialTest
           done
 
   dart:
-    name: Dart Zone, Supabase, and OTEL suite
+    name: Dart Zone, transport fanout, and shutdown suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -151,23 +156,14 @@ jobs:
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
-      - name: Resolve package
+      - name: Canonical Dart package gate
         working-directory: sdk/dart
-        run: dart pub get
-      - name: Format check
-        working-directory: sdk/dart
-        run: dart format --output=none --set-exit-if-changed .
-      - name: Analyze
-        working-directory: sdk/dart
-        run: dart analyze --fatal-infos
-      - name: Test
-        working-directory: sdk/dart
-        run: dart test --reporter expanded
-      - name: Repeat Zone and backpressure paths
+        run: sh test.sh
+      - name: Repeat Zone isolation and transport aggregation paths
         working-directory: sdk/dart
         run: |
           for iteration in $(seq 1 10); do
-            dart test test/adversarial_test.dart --name '100 concurrent async operations|bounded queue drops'
+            dart run test/adversarial.dart
           done
 
   beam:
@@ -182,7 +178,7 @@ jobs:
           elixir-version: "1.18"
       - name: Erlang compile and EUnit
         working-directory: sdk/erlang
-        run: sh test.sh
+        run: bash test.sh
       - name: Elixir format, warnings, and ExUnit
         working-directory: sdk/elixir
-        run: sh test.sh
+        run: bash test.sh

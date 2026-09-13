@@ -177,7 +177,7 @@ func NewOpenTelemetryTransport(emit OpenTelemetryEmitter) *OpenTelemetryTranspor
 func (transport *OpenTelemetryTransport) IsOpenTelemetry() bool { return true }
 
 // IsOtel lets a caller using main's shorter marker skip this transport.
-func (transport *OpenTelemetryTransport) IsOtel() bool { return true }
+func (transport *OpenTelemetryTransport) IsOtel() bool          { return true }
 func (transport *OpenTelemetryTransport) TransportName() string { return "opentelemetry" }
 
 func (transport *OpenTelemetryTransport) Write(record LogRecord) error {
