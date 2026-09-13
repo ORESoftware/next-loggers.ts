@@ -1,0 +1,72 @@
+name: Apply Dart OTEL immutability repair once
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/dart-immutability-repair.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/ores-trace-static-ids
+          fetch-depth: 1
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.3'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Repair immutable OTEL envelope
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const p = 'sdk/dart/lib/next_loggers.dart';
+          let s = fs.readFileSync(p, 'utf8');
+          const old = `    return emit(<String, Object?>{\n      'body': record['message'],\n      'severityText': level.wire,\n      'severityNumber': level.severityNumber,\n      'timestamp': record['timestamp'],\n      'attributes': attributes,\n      'record': _recordCopy(record),\n    });`;
+          const replacement = `    final envelope = _deepFreeze(<String, Object?>{\n      'body': record['message'],\n      'severityText': level.wire,\n      'severityNumber': level.severityNumber,\n      'timestamp': record['timestamp'],\n      'attributes': attributes,\n      'record': _recordCopy(record),\n    })! as Map<String, Object?>;\n    return emit(envelope);`;
+          if (!s.includes(replacement)) {
+            if (!s.includes(old)) throw new Error('OpenTelemetryTransport target block drifted');
+            s = s.replace(old, replacement);
+          }
+          const helper = `\nObject? _deepFreeze(Object? value) {\n  if (value is Map) {\n    return Map<String, Object?>.unmodifiable(\n      value.map<String, Object?>(\n        (key, nested) => MapEntry(key.toString(), _deepFreeze(nested)),\n      ),\n    );\n  }\n  if (value is Iterable) {\n    return List<Object?>.unmodifiable(value.map(_deepFreeze));\n  }\n  return value;\n}\n`;
+          if (!s.includes('Object? _deepFreeze(Object? value)')) s += helper;
+          fs.writeFileSync(p, s);
+          NODE
+      - name: Resolve and canonically format Dart
+        working-directory: sdk/dart
+        run: |
+          set -euo pipefail
+          dart pub get
+          dart format .
+          dart analyze --fatal-infos lib test/conformance.dart test/context_shutdown.dart test/adversarial.dart
+          dart run test/conformance.dart
+          dart run test/context_shutdown.dart
+          dart run test/adversarial.dart
+      - name: Admit repair scope and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          actual="$(git status --porcelain --untracked-files=no | awk '{print $2}' | sort)"
+          expected=$(printf '%s\n' \
+            sdk/dart/lib/next_loggers.dart \
+            sdk/dart/lib/shutdown.dart \
+            sdk/dart/lib/shutdown_logging.dart | sort)
+          if [[ "$actual" != "$expected" ]]; then
+            echo 'Unexpected Dart repair change set:' >&2
+            printf '%s\n' "$actual" >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sdk/dart/lib/next_loggers.dart sdk/dart/lib/shutdown.dart sdk/dart/lib/shutdown_logging.dart
+          git commit -m 'fix(dart): freeze OTEL envelopes and canonicalize SDK'
+          git push origin HEAD:chore/ores-trace-static-ids
