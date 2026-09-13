@@ -27,29 +27,37 @@ IoShutdownBinding installIoShutdownSignals(
   final subscriptions = <StreamSubscription<dynamic>>[];
 
   void request(ShutdownTrigger trigger) {
-    unawaited(coordinator.request(
-      trigger,
-      force: coordinator.phase == ShutdownPhase.draining,
-      interactive: isInteractive,
-    ));
+    unawaited(
+      coordinator.request(
+        trigger,
+        force: coordinator.phase == ShutdownPhase.draining,
+        interactive: isInteractive,
+      ),
+    );
   }
 
-  subscriptions.add(ProcessSignal.sigint.watch().listen((_) {
-    request(ShutdownTrigger.sigint);
-  }));
+  subscriptions.add(
+    ProcessSignal.sigint.watch().listen((_) {
+      request(ShutdownTrigger.sigint);
+    }),
+  );
 
   if (!Platform.isWindows) {
-    subscriptions.add(ProcessSignal.sigterm.watch().listen((_) {
-      request(ShutdownTrigger.sigterm);
-    }));
+    subscriptions.add(
+      ProcessSignal.sigterm.watch().listen((_) {
+        request(ShutdownTrigger.sigterm);
+      }),
+    );
   }
 
   if (isInteractive && listenForStdinEof) {
-    subscriptions.add((stdinStream ?? stdin).listen(
-      (_) {},
-      onDone: () => request(ShutdownTrigger.stdinEof),
-      cancelOnError: false,
-    ));
+    subscriptions.add(
+      (stdinStream ?? stdin).listen(
+        (_) {},
+        onDone: () => request(ShutdownTrigger.stdinEof),
+        cancelOnError: false,
+      ),
+    );
   }
 
   return IoShutdownBinding(subscriptions);

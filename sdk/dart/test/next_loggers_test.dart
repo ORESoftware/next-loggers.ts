@@ -29,21 +29,18 @@ void main() {
     expect(currentLogContext(), isNull);
   });
 
-  test('Supabase transport batches client records through injected sender', () async {
-    final batches = <List<JsonMap>>[];
-    final transport = SupabaseTransport(batchSize: 2, sendBatch: batches.add);
-    final logger = Logger(console: false, transports: [transport]);
-    await Future.wait([
-      logger.info('one').send(),
-      logger.warn('two').send(),
-    ]);
-    expect(batches, hasLength(1));
-    expect(
-      batches.single.map((record) => record['message']),
-      ['one', 'two'],
-    );
-    await transport.close();
-  });
+  test(
+    'Supabase transport batches client records through injected sender',
+    () async {
+      final batches = <List<JsonMap>>[];
+      final transport = SupabaseTransport(batchSize: 2, sendBatch: batches.add);
+      final logger = Logger(console: false, transports: [transport]);
+      await Future.wait([logger.info('one').send(), logger.warn('two').send()]);
+      expect(batches, hasLength(1));
+      expect(batches.single.map((record) => record['message']), ['one', 'two']);
+      await transport.close();
+    },
+  );
 
   test('explicit OTEL span lifecycle is wrapped by next-loggers', () async {
     final transport = MemoryTransport();
@@ -62,10 +59,10 @@ void main() {
     expect(value, 7);
     expect(span.status, 1);
     expect(span.ended, 1);
-    expect(
-      transport.records.map((record) => record.message),
-      ['span started: operation', 'span completed: operation'],
-    );
+    expect(transport.records.map((record) => record.message), [
+      'span started: operation',
+      'span completed: operation',
+    ]);
   });
 
   test('OTEL lifecycle and start failures do not replace results', () async {
@@ -122,11 +119,8 @@ class _Span implements OtelSpan {
   bool failLifecycle = false;
 
   @override
-  LogContext get context => const LogContext(
-        traceId: 'trace',
-        spanId: 'span',
-        traceFlags: 1,
-      );
+  LogContext get context =>
+      const LogContext(traceId: 'trace', spanId: 'span', traceFlags: 1);
 
   @override
   void end() {

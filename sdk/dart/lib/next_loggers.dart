@@ -367,7 +367,7 @@ class Logger {
     stackTrace: stackTrace == null
         ? const <String>[]
         : <String>[stackTrace.toString()],
-     otelEnabled: otel,
+    otelEnabled: otel,
   );
 
   Future<Map<String, Object?>> fatal(
@@ -386,7 +386,7 @@ class Logger {
     stackTrace: stackTrace == null
         ? const <String>[]
         : <String>[stackTrace.toString()],
-     otelEnabled: otel,
+    otelEnabled: otel,
   );
 
   Future<Map<String, Object?>> log(
