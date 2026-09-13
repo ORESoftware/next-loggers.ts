@@ -1,0 +1,34 @@
+name: Dart 3.13.3 format oracle
+
+on:
+  pull_request:
+    paths:
+      - 'sdk/dart/**'
+      - '.github/workflows/dart-format-oracle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-dart-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.3'
+      - name: Resolve package
+        working-directory: sdk/dart
+        run: dart pub get
+      - name: Canonicalize Dart source
+        working-directory: sdk/dart
+        run: dart format .
+      - name: Upload canonical Dart source
+        uses: actions/upload-artifact@v4
+        with:
+          name: dart-3.13.3-canonical
+          path: sdk/dart
+          if-no-files-found: error
+          retention-days: 1
