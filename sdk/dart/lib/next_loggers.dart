@@ -193,8 +193,8 @@ final class LogTransportException implements Exception {
   LogTransportException(
     Iterable<Object> errors,
     Iterable<StackTrace> stackTraces,
-  ) : errors = List<Object>.unmodifiable(errors),
-      stackTraces = List<StackTrace>.unmodifiable(stackTraces);
+  )   : errors = List<Object>.unmodifiable(errors),
+        stackTraces = List<StackTrace>.unmodifiable(stackTraces);
 
   final List<Object> errors;
   final List<StackTrace> stackTraces;
