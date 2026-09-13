@@ -189,6 +189,21 @@ abstract interface class ClosableLogTransport {
   FutureOr<void> close();
 }
 
+final class LogTransportException implements Exception {
+  LogTransportException(
+    Iterable<Object> errors,
+    Iterable<StackTrace> stackTraces,
+  ) : errors = List<Object>.unmodifiable(errors),
+      stackTraces = List<StackTrace>.unmodifiable(stackTraces);
+
+  final List<Object> errors;
+  final List<StackTrace> stackTraces;
+
+  @override
+  String toString() =>
+      'LogTransportException(${errors.length} transport failure(s))';
+}
+
 bool _isOtelTransport(LogTransport transport) {
   if (transport is OpenTelemetryTransport) return true;
   try {
@@ -506,11 +521,21 @@ class Logger {
     };
 
     if (level.index >= minimumLevel.index) {
+      final transportErrors = <Object>[];
+      final transportStackTraces = <StackTrace>[];
       for (final transport in transports) {
         if (_isOtelTransport(transport) && !(otelEnabled ?? otel)) {
           continue;
         }
-        await transport.write(_recordCopy(record));
+        try {
+          await transport.write(_recordCopy(record));
+        } catch (error, stackTrace) {
+          transportErrors.add(error);
+          transportStackTraces.add(stackTrace);
+        }
+      }
+      if (transportErrors.isNotEmpty) {
+        throw LogTransportException(transportErrors, transportStackTraces);
       }
     }
     return _recordCopy(record);
