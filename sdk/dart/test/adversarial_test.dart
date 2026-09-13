@@ -180,9 +180,8 @@ void main() {
           idFactory: () => 'fixed-id',
           clock: () => DateTime.utc(2026, 1, 2, 3, 4, 5),
         );
-        final record = await logger
-            .info('quote" slash\\ newline\n tab\t')
-            .send();
+        final record =
+            await logger.info('quote" slash\\ newline\n tab\t').send();
         final json = record!.toJsonString();
         expect(json, contains('"schema":"next-loggers/v1"'));
         expect(json, contains('quote\\"'));
@@ -521,15 +520,15 @@ void main() {
 }
 
 LogRecord memoryRecord(String message) => LogRecord(
-  id: 'record-$message',
-  timestamp: DateTime.utc(2026).toIso8601String(),
-  level: LogLevel.info,
-  runtime: 'dart',
-  appName: 'test',
-  message: message,
-  values: [message],
-  fields: const {},
-);
+      id: 'record-$message',
+      timestamp: DateTime.utc(2026).toIso8601String(),
+      level: LogLevel.info,
+      runtime: 'dart',
+      appName: 'test',
+      message: message,
+      values: [message],
+      fields: const {},
+    );
 
 class _FailingTransport implements LogTransport {
   _FailingTransport(this.failure);
