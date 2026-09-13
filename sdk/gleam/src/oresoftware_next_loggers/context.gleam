@@ -75,7 +75,11 @@ pub fn start_with_log_context(
   linked: Bool,
   callback: fn() -> value,
 ) -> process.Pid {
-  process.start(fn() { with_log_context(context, callback) }, linked)
+  let running = fn() { with_log_context(context, callback) }
+  case linked {
+    True -> process.spawn(running)
+    False -> process.spawn_unlinked(running)
+  }
 }
 
 pub fn merge(base: LogContext, patch: LogContext) -> LogContext {
@@ -269,11 +273,11 @@ fn merge_optional_fields(
   base: Option(logging.JsonObject),
   patch: Option(logging.JsonObject),
 ) -> Option(logging.JsonObject) {
-  case #(base, patch) {
-    #(None, None) -> None
-    #(Some(value), None) -> Some(value)
-    #(None, Some(value)) -> Some(value)
-    #(Some(left), Some(right)) -> Some(append_unique_fields(left, right))
+  case base, patch {
+    None, None -> None
+    Some(value), None -> Some(value)
+    None, Some(value) -> Some(value)
+    Some(left), Some(right) -> Some(append_unique_fields(left, right))
   }
 }
 
