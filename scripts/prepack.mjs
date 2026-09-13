@@ -1,4 +1,4 @@
-import { existsSync, chmodSync } from 'node:fs';
+import { existsSync, chmodSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 function run(command, args) {
@@ -26,5 +26,9 @@ if (existsSync('.git')) {
   run(tsc, ['-p', 'tsconfig.build.json']);
   chmodSync('dist/cli/main.js', 0o755);
   run(process.execPath, ['scripts/stage-nodejs-release.mjs']);
-  run(process.execPath, ['--test', 'tests/*.test.mjs']);
+  const tests = readdirSync('tests')
+    .filter((name) => name.endsWith('.test.mjs'))
+    .sort()
+    .map((name) => `tests/${name}`);
+  run(process.execPath, ['--test', ...tests]);
 }
