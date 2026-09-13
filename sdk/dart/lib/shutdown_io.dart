@@ -14,11 +14,12 @@ final class IoShutdownBinding {
   }
 }
 
-/// Installs native signal sources. In a TTY, the first SIGINT/SIGTERM starts
-/// drain and a second signal or Ctrl-D/stdin EOF forces. In non-TTY processes,
-/// one signal starts shutdown and the coordinator's deadline escalates it.
+/// Adds native signal and optional stdin-EOF sources to an existing canonical
+/// [ProcessShutdownController]. `installProcessShutdown` already installs these
+/// sources for the common case; this compatibility adapter is for applications
+/// that own controller creation separately.
 IoShutdownBinding installIoShutdownSignals(
-  ShutdownCoordinator coordinator, {
+  ProcessShutdownController controller, {
   bool? interactive,
   bool listenForStdinEof = true,
   Stream<List<int>>? stdinStream,
@@ -26,26 +27,24 @@ IoShutdownBinding installIoShutdownSignals(
   final isInteractive = interactive ?? stdin.hasTerminal;
   final subscriptions = <StreamSubscription<dynamic>>[];
 
-  void request(ShutdownTrigger trigger) {
-    unawaited(
-      coordinator.request(
-        trigger,
-        force: coordinator.phase == ShutdownPhase.draining,
-        interactive: isInteractive,
-      ),
-    );
+  void request(ShutdownCause cause) {
+    if (controller.phase == ShutdownPhase.draining) {
+      controller.force(cause);
+    } else {
+      controller.trigger(cause);
+    }
   }
 
   subscriptions.add(
     ProcessSignal.sigint.watch().listen((_) {
-      request(ShutdownTrigger.sigint);
+      request(ShutdownCause.sigint);
     }),
   );
 
   if (!Platform.isWindows) {
     subscriptions.add(
       ProcessSignal.sigterm.watch().listen((_) {
-        request(ShutdownTrigger.sigterm);
+        request(ShutdownCause.sigterm);
       }),
     );
   }
@@ -54,7 +53,7 @@ IoShutdownBinding installIoShutdownSignals(
     subscriptions.add(
       (stdinStream ?? stdin).listen(
         (_) {},
-        onDone: () => request(ShutdownTrigger.stdinEof),
+        onDone: () => request(ShutdownCause.stdinEof),
         cancelOnError: false,
       ),
     );
