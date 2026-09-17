@@ -158,7 +158,21 @@ jobs:
           sdk: stable
       - name: Canonical Dart package gate
         working-directory: sdk/dart
-        run: sh test.sh
+        shell: bash
+        run: |
+          mkdir -p ../../artifacts
+          set -o pipefail
+          sh test.sh \
+            > >(tee ../../artifacts/dart-gate.stdout.log) \
+            2> >(tee ../../artifacts/dart-gate.stderr.log >&2)
+      - name: Retain canonical Dart gate diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dart-gate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/dart-gate.*.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Repeat Zone isolation and transport aggregation paths
         working-directory: sdk/dart
         run: |
