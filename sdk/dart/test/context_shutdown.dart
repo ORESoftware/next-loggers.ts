@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:oresoftware_next_loggers/oresoftware_next_loggers.dart';
-import 'package:oresoftware_next_loggers/shutdown.dart';
 
 Future<void> main() async {
   final transport = MemoryTransport();
