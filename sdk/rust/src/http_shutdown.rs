@@ -162,10 +162,7 @@ impl HttpShutdownController {
         Self::with_grace_period(observer, DEFAULT_HTTP_GRACE_PERIOD)
     }
 
-    pub fn with_grace_period(
-        observer: Option<ShutdownObserver>,
-        grace_period: Duration,
-    ) -> Self {
+    pub fn with_grace_period(observer: Option<ShutdownObserver>, grace_period: Duration) -> Self {
         Self {
             lifecycle: ShutdownCoordinator::new(observer),
             gate: HttpShutdownGate::new(grace_period),
@@ -206,12 +203,8 @@ impl HttpShutdownController {
             (ShutdownTrigger::StdinEof, true, ShutdownPhase::Draining) => {
                 self.lifecycle.force(trigger.clone(), true)
             }
-            (ShutdownTrigger::SigInt, true, ShutdownPhase::Draining) => {
-                ShutdownDecision::Ignore
-            }
-            (ShutdownTrigger::Timeout, _, _) => {
-                self.lifecycle.force(trigger.clone(), interactive)
-            }
+            (ShutdownTrigger::SigInt, true, ShutdownPhase::Draining) => ShutdownDecision::Ignore,
+            (ShutdownTrigger::Timeout, _, _) => self.lifecycle.force(trigger.clone(), interactive),
             _ => self.lifecycle.request(trigger.clone(), interactive),
         };
 
@@ -321,10 +314,7 @@ mod tests {
 
     #[test]
     fn grace_deadline_can_escalate_without_a_second_signal() {
-        let controller = HttpShutdownController::with_grace_period(
-            None,
-            Duration::from_millis(2),
-        );
+        let controller = HttpShutdownController::with_grace_period(None, Duration::from_millis(2));
         controller.handle_signal(ShutdownTrigger::SigTerm, false);
         thread::sleep(Duration::from_millis(4));
         assert!(controller.deadline_expired());
