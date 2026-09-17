@@ -519,6 +519,7 @@ class Logger {
       if (errors.isNotEmpty) 'errors': _normalize(errors),
       if (stackTrace.isNotEmpty) 'stackTrace': stackTrace,
     };
+    final canonicalRecord = _immutableRecordCopy(record);
 
     if (level.index >= minimumLevel.index) {
       final transportErrors = <Object>[];
@@ -528,7 +529,7 @@ class Logger {
           continue;
         }
         try {
-          await transport.write(_recordCopy(record));
+          await transport.write(canonicalRecord);
         } catch (error, stackTrace) {
           transportErrors.add(error);
           transportStackTraces.add(stackTrace);
@@ -538,7 +539,7 @@ class Logger {
         throw LogTransportException(transportErrors, transportStackTraces);
       }
     }
-    return _recordCopy(record);
+    return canonicalRecord;
   }
 
   Future<void> flush() async {
@@ -614,8 +615,7 @@ class SupabaseTransport implements LogTransport {
   final FutureOr<void> Function(Map<String, Object?> record) insert;
 
   @override
-  FutureOr<void> write(Map<String, Object?> record) =>
-      insert(_recordCopy(record));
+  FutureOr<void> write(Map<String, Object?> record) => insert(record);
 }
 
 class MemoryTransport
