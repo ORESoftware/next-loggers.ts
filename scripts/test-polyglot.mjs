@@ -57,6 +57,12 @@ const suites = [
     cwd: path.join(root, 'sdk', 'java'),
   },
   {
+    name: 'Dart package resolve',
+    command: 'dart',
+    args: ['pub', 'get'],
+    cwd: path.join(root, 'sdk', 'dart'),
+  },
+  {
     name: 'Dart format',
     command: 'dart',
     args: ['format', '--output=none', '--set-exit-if-changed', 'lib', 'test'],

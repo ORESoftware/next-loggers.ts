@@ -4,4 +4,5 @@
 mod logger_core;
 
 pub use logger_core::*;
+pub mod http_shutdown;
 pub mod shutdown;
