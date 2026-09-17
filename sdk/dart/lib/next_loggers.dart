@@ -589,23 +589,23 @@ class OpenTelemetryTransport implements LogTransport {
       (record['fields'] as Map?)?.cast<String, Object?>() ??
           const <String, Object?>{},
     );
-    final attributes = <String, Object?>{
+    final attributes = Map<String, Object?>.unmodifiable(<String, Object?>{
       'service.name': record['appName'],
       'next_logger.schema': record['schema'],
       'next_logger.runtime': record['runtime'],
       'log.record.uid': record['id'],
       if (record['traceId'] != null) 'trace.id': record['traceId'],
       for (final entry in fields.entries)
-        'next_logger.field.${entry.key}': entry.value,
-    };
-    return emit(<String, Object?>{
+        'next_logger.field.${entry.key}': _freeze(entry.value),
+    });
+    return emit(Map<String, Object?>.unmodifiable(<String, Object?>{
       'body': record['message'],
       'severityText': level.wire,
       'severityNumber': level.severityNumber,
       'timestamp': record['timestamp'],
       'attributes': attributes,
-      'record': _recordCopy(record),
-    });
+      'record': _immutableRecordCopy(record),
+    }));
   }
 }
 
@@ -723,6 +723,21 @@ Object? _normalizeValue(Object? value, int depth, Set<Object> ancestors) {
   }
 }
 
+Object? _freeze(Object? value) {
+  if (value is Map) {
+    return Map<String, Object?>.unmodifiable(
+      value.map<String, Object?>(
+        (key, entryValue) =>
+            MapEntry<String, Object?>(key.toString(), _freeze(entryValue)),
+      ),
+    );
+  }
+  if (value is Iterable) {
+    return List<Object?>.unmodifiable(value.map<Object?>(_freeze));
+  }
+  return value;
+}
+
 Map<String, Object?> _recordCopy(Map<String, Object?> record) {
   final normalized = _normalize(record);
   if (normalized is! Map) {
@@ -732,3 +747,6 @@ Map<String, Object?> _recordCopy(Map<String, Object?> record) {
     (key, value) => MapEntry<String, Object?>(key.toString(), value),
   );
 }
+
+Map<String, Object?> _immutableRecordCopy(Map<String, Object?> record) =>
+    _freeze(_recordCopy(record))! as Map<String, Object?>;
