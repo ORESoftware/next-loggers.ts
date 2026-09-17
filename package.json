@@ -166,7 +166,7 @@
     "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
     "audit:shutdown": "node scripts/audit-server-shutdown.mjs",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
-    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json --prefix sdk/nodejs",
+    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json ./sdk/nodejs",
     "prepack": "node scripts/prepack.mjs",
     "lint:ores": "if [ -f .ores-lint/lint.sh ]; then sh .ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
     "prepublishOnly": "npm run lint:ores",
